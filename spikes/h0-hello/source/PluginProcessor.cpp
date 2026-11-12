@@ -85,8 +85,11 @@ private:
 PluginProcessor::PluginProcessor()
     : AudioProcessor (BusesProperties()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
-                          // The sidechain input the H0 spike tests: can the host feed audio
-                          // into an instrument?
+                          // H0 spike, variant B: can the host feed audio into an instrument?
+                          // Variant A declared only a main input; FL's generator wrapper showed
+                          // no input ports. Here the main input is off and a second (aux /
+                          // sidechain) bus is on, which VST3 hosts treat as a separate port.
+                          .withInput ("Input", juce::AudioChannelSet::stereo(), false)
                           .withInput ("Sidechain", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "STATE", createParameterLayout())
 {
@@ -117,8 +120,10 @@ bool PluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     if (out != juce::AudioChannelSet::stereo() && out != juce::AudioChannelSet::mono())
         return false;
 
-    const auto in = layouts.getMainInputChannelSet();
-    return in.isDisabled() || in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo();
+    for (const auto& in : layouts.inputBuses)
+        if (! (in.isDisabled() || in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo()))
+            return false;
+    return true;
 }
 
 void PluginProcessor::prepareToPlay (double sampleRate, int)
@@ -136,16 +141,23 @@ void PluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     // 1. Measure the sidechain BEFORE we overwrite the buffer: in JUCE the input and output
     //    buses share the same channel memory.
-    const auto inBus = getBusBuffer (buffer, true, 0);
-    sidechainChannels.store (inBus.getNumChannels(), std::memory_order_relaxed);
+    //    Every enabled input bus counts (main or sidechain), so the meter shows whichever the
+    //    host actually feeds.
+    int inChannels = 0;
     float sumSquares = 0.0f;
-    for (int ch = 0; ch < inBus.getNumChannels(); ++ch)
+    for (int bus = 0; bus < getBusCount (true); ++bus)
     {
-        const auto* x = inBus.getReadPointer (ch);
-        for (int i = 0; i < numSamples; ++i)
-            sumSquares += x[i] * x[i];
+        const auto inBus = getBusBuffer (buffer, true, bus);
+        inChannels += inBus.getNumChannels();
+        for (int ch = 0; ch < inBus.getNumChannels(); ++ch)
+        {
+            const auto* x = inBus.getReadPointer (ch);
+            for (int i = 0; i < numSamples; ++i)
+                sumSquares += x[i] * x[i];
+        }
     }
-    const int count = juce::jmax (1, numSamples * inBus.getNumChannels());
+    sidechainChannels.store (inChannels, std::memory_order_relaxed);
+    const int count = juce::jmax (1, numSamples * inChannels);
     const float rms = std::sqrt (sumSquares / static_cast<float> (count));
     // Simple meter ballistics: instant attack, smooth release.
     const float prev = sidechainRms.load (std::memory_order_relaxed);

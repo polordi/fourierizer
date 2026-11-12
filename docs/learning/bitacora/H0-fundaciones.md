@@ -46,6 +46,7 @@ Un plugin de prueba (*spike*), **Fourierizer H0 Spike**: un instrumento de onda 
 
 - ✅ Compila en Release con MSVC 14.44 / JUCE 8.0.15, sin errores.
 - ✅ pluginval nivel 8 (sin GUI): SUCCESS.
-- ⏳ Prueba 1 en FL (MIDI → sonido): pendiente.
-- ⏳ Prueba 2 en FL (UI web ↔ parámetro): pendiente.
+- ✅ Prueba 1 en FL Studio 2026 (MIDI → sonido).
+- ✅ Prueba 2 en FL Studio 2026 (UI web ↔ parámetro): la WebView2 funciona dentro de FL.
+- ⚠️ FL registró la carpeta de VST3 por usuario como ruta **VST2** (`plugclass = 0` en `HKCU\Software\Image-Line\Shared\Plugin search paths\List\N`; VST3 es `7`) y no veía el plugin. Se corrigió a mano. Lección para el release: el instalador debe copiar el plugin a `C:\Program Files\Common Files\VST3`.
 - ⏳ Prueba 3 en FL (sidechain a un instrumento): pendiente.

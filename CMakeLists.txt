@@ -16,6 +16,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # ---- Dependencies -------------------------------------------------------------------------
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
+# Dependencies are pinned to exact tags: once downloaded, never re-check them on reconfigure.
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "")
 
 FetchContent_Declare(JUCE
     GIT_REPOSITORY https://github.com/juce-framework/JUCE.git

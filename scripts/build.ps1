@@ -21,10 +21,14 @@ Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
 
 $buildDir = Join-Path $repo "build\$($Config.ToLower())"
+# Native tools (git, cmake) write progress to stderr; in Windows PowerShell 5.1 that must not
+# count as a failure. Judge them by their exit code instead.
+$ErrorActionPreference = "Continue"
 cmake -S $repo -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 cmake --build $buildDir --parallel
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+$ErrorActionPreference = "Stop"
 
 Write-Host "`nBuilt in $buildDir" -ForegroundColor Green
 Write-Host "VST3 copied to $env:LOCALAPPDATA\Programs\Common\VST3"
