@@ -1,0 +1,420 @@
+<title>Brief de diseño Fourierizer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&family=DotGothic16&family=Silkscreen&family=Space+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: una columna de "módulos" tipo panel de hardware; cada pregunta es un módulo con su fila de opciones dibujadas. */
+:root {
+  --bg: #E9EAE6;          /* chasis claro, ligeramente verdoso-gris */
+  --panel: #F7F7F4;
+  --ink: #141414;
+  --ink-2: #5C5E58;
+  --line: #C9CAC4;
+  --pick: #141414;        /* marco de selección */
+  --focus: #1F5BD6;
+  /* superficies del "dispositivo" en las vistas previas: siempre claras, a propósito */
+  --dev-bg: #E3E4DF;
+  --dev-ink: #141414;
+  --dev-line: #BDBEB8;
+  --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1A1B19; --panel: #232421; --ink: #EDEDE8; --ink-2: #A3A59E; --line: #3A3C37; --pick: #EDEDE8; --focus: #6E9BFF;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1A1B19; --panel: #232421; --ink: #EDEDE8; --ink-2: #A3A59E; --line: #3A3C37; --pick: #EDEDE8; --focus: #6E9BFF;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 32px 96px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: grid; gap: 28px; }
+header { display: grid; gap: 14px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); display: flex; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.05; font-weight: 800; letter-spacing: -.02em; margin: 0; text-wrap: balance; }
+.lede { max-width: 66ch; margin: 0; color: var(--ink-2); }
+.strip { display: flex; gap: 0; border: 1.5px solid var(--ink); width: max-content; max-width: 100%; }
+.strip span { width: 56px; height: 28px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px; color: #fff; }
+.strip span.bgchip { color: #141414; border-left: 1.5px solid var(--ink); }
+.progress { font-family: var(--font-mono); font-size: 12px; color: var(--ink-2); }
+.progress b { color: var(--ink); }
+
+section.group { display: grid; gap: 14px; }
+section.group > h2 { font-size: 13px; font-family: var(--font-mono); letter-spacing: .1em; text-transform: uppercase; margin: 8px 0 0; color: var(--ink-2); display: flex; gap: 10px; align-items: center; }
+section.group > h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+.q { background: var(--panel); border: 1px solid var(--line); padding: 18px; display: grid; gap: 12px; }
+.q h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.005em; }
+.q .help { margin: 0; color: var(--ink-2); max-width: 70ch; font-size: 14px; }
+.opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.opt { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 8px; align-content: start; padding: 10px; border: 1.5px solid var(--line); background: var(--panel); min-width: 0; }
+.opt:hover { border-color: var(--ink-2); }
+.opt:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.opt[aria-pressed="true"] { border-color: var(--pick); box-shadow: inset 0 0 0 1.5px var(--pick); }
+.opt .lab { font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+.opt .lab .tick { font-family: var(--font-mono); font-size: 11px; visibility: hidden; }
+.opt[aria-pressed="true"] .lab .tick { visibility: visible; }
+.opt .desc { font-size: 13px; color: var(--ink-2); }
+.pv { background: var(--dev-bg); border: 1px solid var(--dev-line); min-height: 96px; display: grid; place-items: center; overflow: hidden; color: var(--dev-ink); position: relative; }
+.note { display: grid; gap: 6px; }
+.note summary { cursor: pointer; font-size: 13px; color: var(--ink-2); width: max-content; }
+textarea { width: 100%; min-height: 64px; font: inherit; font-size: 14px; padding: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }
+textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.finish { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.btn { all: unset; cursor: pointer; font-weight: 600; padding: 12px 18px; background: var(--ink); color: var(--bg); }
+.btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.status { position: fixed; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); font-family: var(--font-mono); font-size: 12px; background: var(--panel); border: 1px solid var(--line); padding: 8px 12px; color: var(--ink-2); max-width: calc(100vw - 32px); }
+.status[data-kind="ok"]::before { content: "● "; color: #10A04A; }
+.status[data-kind="warn"]::before { content: "● "; color: #D97757; }
+
+/* piezas de vista previa */
+.sw { width: 100%; height: 96px; display: flex; align-items: flex-end; justify-content: space-between; padding: 8px; font-family: var(--font-mono); font-size: 11px; }
+.mini-panel { width: 100%; height: 100%; min-height: 96px; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px; }
+.mono { font-family: var(--font-mono); }
+canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.layout { width: 100%; height: 110px; padding: 8px; display: grid; gap: 4px; }
+.layout div { border: 1px solid var(--dev-ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .anim-play { animation: play 2.4s linear infinite; }
+  .anim-bounce { animation: bounce 1.6s cubic-bezier(.3,1.6,.5,1) infinite; transform-box: view-box; transform-origin: 50% 50%; }
+}
+@keyframes play { from { left: 8%; } to { left: 92%; } }
+@keyframes bounce { 0%, 60%, 100% { transform: rotate(-40deg); } 30% { transform: rotate(70deg); } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><span>Fourierizer 2</span><span>H1 · Brief de diseño</span><span>Ronda 0</span></div>
+    <h1>¿Cómo se debe ver y sentir Fourierizer?</h1>
+    <p class="lede">Elige la opción que más te guste en cada módulo. Si ninguna te convence, o te gusta una mezcla, escríbelo en "Agregar comentario". No hay respuestas correctas: yo convierto esto en el sistema de diseño y en los primeros mockups. Todo es original e inspirado en principios del diseño de hardware, no en una copia de algún producto.</p>
+    <div class="strip" id="strip" aria-label="Tu paleta actual"></div>
+    <div class="progress" id="progress"></div>
+  </header>
+  <div id="form"></div>
+  <div class="finish">
+    <button class="btn" id="done" type="button">Marcar como terminado</button>
+    <span class="progress" id="doneMsg"></span>
+  </div>
+</div>
+<div class="status" id="status" data-kind="warn">Conectando…</div>
+
+<script>
+(() => {
+  // ---------- datos ----------
+  const ORANGE = [
+    { id: "claude", label: "Claude", hex: "#D97757", desc: "Terracota suave, cálido." },
+    { id: "signal", label: "Señal", hex: "#FF5F1F", desc: "Naranja de alerta, muy vivo." },
+    { id: "mandarina", label: "Mandarina", hex: "#F28C28", desc: "Más amarillo, alegre." },
+  ];
+  const GREEN = [
+    { id: "celtics", label: "Celtics", hex: "#007A33", desc: "Verde profundo de cancha." },
+    { id: "cesped", label: "Césped", hex: "#10A04A", desc: "Más claro y brillante." },
+    { id: "jade", label: "Jade", hex: "#00875A", desc: "Con un toque azulado." },
+  ];
+  const BLUE = [
+    { id: "panthers", label: "Panthers", hex: "#0085CA", desc: "Azul cielo intenso." },
+    { id: "cobalto", label: "Cobalto", hex: "#1F5BD6", desc: "Más profundo, eléctrico." },
+    { id: "cian", label: "Cian", hex: "#00A3D9", desc: "Más claro, casi turquesa." },
+  ];
+  const PURPLE = [
+    { id: "fucsia", label: "Fucsia", hex: "#D6247A", desc: "Rosa intenso." },
+    { id: "magenta", label: "Magenta", hex: "#B4228F", desc: "Entre rosa y morado." },
+    { id: "violeta", label: "Violeta", hex: "#7A3FD1", desc: "Morado eléctrico." },
+    { id: "uva", label: "Uva", hex: "#5B2A86", desc: "Morado oscuro, sobrio." },
+  ];
+  const BGS = [
+    { id: "aluminio", label: "Aluminio", hex: "#DCDDD8", desc: "Gris metálico claro, como un chasis." },
+    { id: "papel", label: "Papel", hex: "#EFEFEA", desc: "Blanco roto, neutro." },
+    { id: "blanco", label: "Blanco", hex: "#FFFFFF", desc: "Blanco puro, máximo contraste." },
+    { id: "frio", label: "Gris frío", hex: "#E4E7EA", desc: "Gris con tinte azulado." },
+  ];
+
+  const state = { answers: {}, notes: {}, text: {}, done: false };
+  const pick = (list, id) => list.find(o => o.id === state.answers[id]) || list[0];
+  const palette = () => ({
+    o: pick(ORANGE, "c_orange").hex, g: pick(GREEN, "c_green").hex,
+    b: pick(BLUE, "c_blue").hex, p: pick(PURPLE, "c_purple").hex,
+    bg: pick(BGS, "bg").hex,
+  });
+
+  // ---------- piezas gráficas ----------
+  const polar = (cx, cy, r, deg) => { const a = (deg - 90) * Math.PI / 180; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
+  const arc = (cx, cy, r, a0, a1) => { const [x0, y0] = polar(cx, cy, r, a0), [x1, y1] = polar(cx, cy, r, a1); return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`; };
+
+  function knob(style, color, v = 0.62, cls = "") {
+    const ang = -135 + 270 * v;
+    if (style === "encoder") {
+      const [x, y] = polar(24, 24, 15, ang);
+      return `<svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20" fill="${color}"/><g class="${cls}"><line x1="24" y1="24" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></g></svg>`;
+    }
+    if (style === "ring") {
+      return `<svg width="48" height="48" viewBox="0 0 48 48" aria-hidden="true"><path d="${arc(24, 24, 18, -135, 135)}" stroke="#BDBEB8" stroke-width="4" fill="none"/><path d="${arc(24, 24, 18, -135, ang)}" stroke="${color}" stroke-width="4" fill="none"/><text x="24" y="28" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="#141414">${Math.round(v * 100)}</text></svg>`;
+    }
+    if (style === "fader") {
+      const y = 6 + (1 - v) * 30;
+      return `<svg width="28" height="48" viewBox="0 0 28 48" aria-hidden="true"><rect x="12" y="4" width="4" height="40" fill="#BDBEB8"/><rect x="12" y="${y + 6}" width="4" height="${44 - y - 6}" fill="${color}"/><rect x="3" y="${y}" width="22" height="10" fill="#141414"/></svg>`;
+    }
+    // stepper
+    return `<svg width="64" height="40" viewBox="0 0 64 40" aria-hidden="true"><rect x="1" y="1" width="62" height="38" fill="#fff" stroke="#141414"/><rect x="1" y="33" width="${(62 * v).toFixed(1)}" height="6" fill="${color}"/><text x="32" y="22" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="600" fill="#141414">${Math.round(v * 127)}</text><text x="8" y="22" font-family="IBM Plex Mono, monospace" font-size="13" fill="#141414">−</text><text x="51" y="22" font-family="IBM Plex Mono, monospace" font-size="13" fill="#141414">+</text></svg>`;
+  }
+  const knobRow = (style, P, cls = "") => `<div class="mini-panel" style="background:${P.bg}">${[P.o, P.g, P.b, P.p].map((c, i) => knob(style, c, [0.3, 0.55, 0.75, 0.45][i], cls)).join("")}</div>`;
+
+  // espectrograma sintético (armónicos que decaen + transiente de ataque), eje de frecuencia logarítmico
+  const SW = 180, SH = 84;
+  const spec = (() => {
+    const m = new Float32Array(SW * SH);
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let x = 0; x < SW; x++) {
+      const t = x / SW;
+      for (let y = 0; y < SH; y++) {
+        const f = 40 * Math.pow(2, (1 - y / SH) * 9);           // 40 Hz … 20 kHz
+        let v = 0;
+        const f0 = 110 * (1 + 0.012 * Math.sin(t * 18));         // vibrato leve
+        for (let h = 1; h <= 24; h++) {
+          const fh = f0 * h, d = Math.log2(f / fh) * 24;
+          v += Math.exp(-d * d) * Math.exp(-t * (1.2 + h * 0.35)) / Math.sqrt(h);
+        }
+        v += (t < 0.06 ? (0.06 - t) * 9 * rnd() : 0) + 0.04 * rnd() * Math.exp(-t * 2);
+        m[y * SW + x] = v;
+      }
+    }
+    let mx = 0; for (const v of m) mx = Math.max(mx, v);
+    for (let i = 0; i < m.length; i++) m[i] = Math.pow(Math.min(1, m[i] / mx), 0.45);
+    return m;
+  })();
+  const hex2rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+  const ramp = (stops, t) => { const n = stops.length - 1, i = Math.min(n - 1, Math.floor(t * n)), u = t * n - i; return mix(stops[i], stops[i + 1], u); };
+  const INFERNO = [[0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99], [212, 72, 66], [245, 125, 21], [250, 193, 39], [252, 255, 164]];
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function drawSpec(canvas, mode, P) {
+    canvas.width = SW; canvas.height = SH;
+    const ctx = canvas.getContext("2d"), img = ctx.createImageData(SW, SH);
+    const bg = hex2rgb(P.bg), ink = [20, 20, 20], lay = hex2rgb(P.o);
+    for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const v = spec[y * SW + x]; let c;
+      if (mode === "ink") c = mix(bg, ink, v);
+      else if (mode === "layer") c = mix(bg, lay, v);
+      else if (mode === "inferno") c = ramp(INFERNO, v);
+      else c = v > (BAYER[(y % 4) * 4 + (x % 4)] + 0.5) / 16 ? ink : bg;
+      const k = (y * SW + x) * 4; img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2]; img.data[k + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // ---------- preguntas ----------
+  const swatch = (o) => () => `<div class="sw" style="background:${o.hex};color:#fff"><span>${o.label.toUpperCase()}</span><span>${o.hex}</span></div>`;
+  const colorQ = (id, title, list, help) => ({ id, title, help, options: list.map(o => ({ id: o.id, label: o.label, desc: o.desc, pv: swatch(o) })) });
+
+  const FONT_SAMPLE = (head, body, num) => () => `<div style="width:100%;padding:12px;display:grid;gap:6px;text-align:left">
+      <div style="font-family:${head};font-size:22px;line-height:1;letter-spacing:.01em">FOURIERIZE</div>
+      <div style="font-family:${body};font-size:12px;letter-spacing:.06em">LAYER 2 · HANN · TAPE</div>
+      <div style="font-family:${num};font-size:15px">N 4096 &nbsp; H 512 &nbsp; 440.0 Hz</div></div>`;
+
+  const LAYOUT = (cols, rows, cells) => (P) => `<div class="layout" style="grid-template-columns:${cols};grid-template-rows:${rows};background:${P.bg}">${cells(P)}</div>`;
+
+  const GROUPS = [
+    { title: "A · Color", qs: [
+      colorQ("c_orange", "Capa 1: ¿qué naranja?", ORANGE, "Cada capa tendrá su color en toda la interfaz: su slot, su espectrograma, sus selecciones y sus perillas."),
+      colorQ("c_green", "Capa 2: ¿qué verde?", GREEN),
+      colorQ("c_blue", "Capa 3: ¿qué azul?", BLUE),
+      colorQ("c_purple", "Capa 4: ¿qué morado o fucsia?", PURPLE),
+      { id: "bg", title: "¿Sobre qué fondo claro?", help: "La vista previa usa los colores que vas eligiendo arriba.",
+        options: BGS.map(o => ({ id: o.id, label: o.label, desc: o.desc, pv: (P) => knobRow("encoder", { ...P, bg: o.hex }) })) },
+      { id: "color_amount", title: "¿Cuánto color?", help: "Qué tanto espacio ocupan los colores de las capas.",
+        options: [
+          { id: "accent", label: "Solo acentos", desc: "Casi todo es gris y negro; el color aparece solo en perillas, líneas y selecciones.",
+            pv: (P) => `<div class="mini-panel" style="background:${P.bg};justify-content:space-around">${[P.o, P.g, P.b, P.p].map(c => `<div style="width:30px;height:46px;border:1.5px solid #141414;display:grid;align-content:end"><div style="height:6px;background:${c}"></div></div>`).join("")}</div>` },
+          { id: "blocks", label: "Bloques de color", desc: "Paneles o teclas completas de color, como piezas de un instrumento.",
+            pv: (P) => `<div class="mini-panel" style="background:${P.bg};justify-content:space-around">${[P.o, P.g, P.b, P.p].map(c => `<div style="width:30px;height:46px;background:${c}"></div>`).join("")}</div>` },
+          { id: "mixed", label: "Mixto", desc: "Interfaz sobria con uno o dos elementos grandes de color (por ejemplo, la capa activa).",
+            pv: (P) => `<div class="mini-panel" style="background:${P.bg};justify-content:space-around">${[P.o, P.g, P.b, P.p].map((c, i) => i === 0 ? `<div style="width:30px;height:46px;background:${c}"></div>` : `<div style="width:30px;height:46px;border:1.5px solid #141414;display:grid;align-content:end"><div style="height:6px;background:${c}"></div></div>`).join("")}</div>` },
+        ] },
+    ] },
+    { title: "B · Forma", qs: [
+      { id: "font", title: "¿Qué tipografía?", help: "Títulos, etiquetas y números.",
+        options: [
+          { id: "plex", label: "Técnica monoespaciada", desc: "Todo en una sola fuente monoespaciada. Ingenieril, de laboratorio.", pv: FONT_SAMPLE("'IBM Plex Mono', monospace", "'IBM Plex Mono', monospace", "'IBM Plex Mono', monospace") },
+          { id: "grotesk", label: "Grotesca + mono", desc: "Etiquetas en sans-serif firme y números en monoespaciada.", pv: FONT_SAMPLE("'Archivo', sans-serif", "'Archivo', sans-serif", "'IBM Plex Mono', monospace") },
+          { id: "lcd", label: "Display tipo LCD", desc: "Números con aspecto de pantalla de matriz de puntos.", pv: FONT_SAMPLE("'DotGothic16', monospace", "'Archivo', sans-serif", "'DotGothic16', monospace") },
+          { id: "pixel", label: "Pixel", desc: "Etiquetas de píxel cuadrado, muy de máquina retro.", pv: FONT_SAMPLE("'Silkscreen', monospace", "'Silkscreen', monospace", "'Space Mono', monospace") },
+        ] },
+      { id: "knob", title: "¿Qué tipo de control?", help: "Cómo se ven las perillas y valores.",
+        options: [
+          { id: "encoder", label: "Encoder de color", desc: "Círculo sólido del color de la capa con indicador blanco.", pv: (P) => knobRow("encoder", P) },
+          { id: "ring", label: "Anillo de valor", desc: "Arco delgado que se llena, con el número al centro.", pv: (P) => knobRow("ring", P) },
+          { id: "fader", label: "Fader", desc: "Deslizadores verticales, como una consola.", pv: (P) => knobRow("fader", P) },
+          { id: "stepper", label: "Valor numérico", desc: "Número grande con − y +, y una barra fina debajo.", pv: (P) => `<div class="mini-panel" style="background:${P.bg};flex-wrap:wrap">${knob("stepper", P.o, .5)}${knob("stepper", P.b, .8)}</div>` },
+        ] },
+      { id: "corners", title: "¿Qué esquinas?", options: [0, 4, 12, 999].map((r, i) => ({
+          id: ["square", "soft", "round", "pill"][i], label: ["Rectas", "Apenas redondeadas", "Redondeadas", "Píldora"][i],
+          desc: ["Puro ángulo recto, muy preciso.", "Un radio mínimo, se siente más físico.", "Amigable, tipo juguete.", "Botones en forma de cápsula."][i],
+          pv: (P) => `<div class="mini-panel" style="background:${P.bg}"><div style="width:70px;height:56px;border:1.5px solid #141414;border-radius:${Math.min(r, 14)}px;background:#fff"></div><div style="padding:8px 14px;border-radius:${r}px;background:${P.o};color:#fff;font:600 12px 'Archivo',sans-serif">PLAY</div></div>` })) },
+      { id: "density", title: "¿Qué densidad?", options: [
+          { id: "dense", label: "Compacta", desc: "Mucha información a la vista, como una herramienta profesional.", pv: (P) => `<div style="width:100%;padding:8px;display:grid;grid-template-columns:repeat(6,1fr);gap:3px;background:${P.bg}">${Array.from({ length: 18 }, (_, i) => `<div style="height:16px;border:1px solid #141414;background:${i % 7 === 0 ? P.g : "#fff"}"></div>`).join("")}</div>` },
+          { id: "airy", label: "Aireada", desc: "Pocos controles grandes, mucho espacio. Más tipo instrumento.", pv: (P) => `<div style="width:100%;padding:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;background:${P.bg}">${Array.from({ length: 3 }, (_, i) => `<div style="height:40px;border:1.5px solid #141414;background:${i === 1 ? P.g : "#fff"}"></div>`).join("")}</div>` },
+        ] },
+      { id: "hardware", title: "¿Cuánta referencia a hardware?", help: "Detalles que hacen que la pantalla parezca un aparato físico.",
+        options: [
+          { id: "none", label: "Ninguna", desc: "Interfaz 100% digital, plana.", pv: (P) => `<div style="width:86%;height:70px;background:#fff;border:1px solid #141414"></div>` },
+          { id: "subtle", label: "Sutil", desc: "Etiquetas de panel, número de modelo, líneas de serigrafía.", pv: (P) => `<div style="width:86%;height:70px;background:${P.bg};border:1.5px solid #141414;position:relative"><span class="mono" style="position:absolute;left:6px;top:4px;font-size:9px">FZ-2</span><span class="mono" style="position:absolute;right:6px;bottom:4px;font-size:9px">SPECTRAL SAMPLER</span><div style="position:absolute;left:6px;right:6px;top:22px;height:1px;background:#141414"></div></div>` },
+          { id: "strong", label: "Marcada", desc: "Tornillos, rejilla de bocina, paneles con relieve.", pv: (P) => `<div style="width:86%;height:70px;background:${P.bg};border:2px solid #141414;position:relative;box-shadow:inset 0 -6px 0 rgba(0,0,0,.08)">${[[4, 4], [4, "auto"], ["auto", 4], ["auto", "auto"]].map(([l, t]) => `<span style="position:absolute;${l === "auto" ? "right:4px" : "left:4px"};${t === "auto" ? "bottom:4px" : "top:4px"};width:7px;height:7px;border-radius:50%;border:1.5px solid #141414"></span>`).join("")}<div style="position:absolute;right:16px;top:16px;width:44px;height:36px;background-image:radial-gradient(#141414 1.2px, transparent 1.4px);background-size:6px 6px"></div></div>` },
+        ] },
+    ] },
+    { title: "C · Pantalla", qs: [
+      { id: "cmap", title: "¿Cómo se pinta el espectrograma?", help: "El mismo sonido (una nota con armónicos que se apagan) en cuatro estilos. El brillo o la densidad indica intensidad.",
+        options: [
+          { id: "ink", label: "Tinta", desc: "Escala de grises sobre el fondo, como un dibujo a lápiz.", pv: () => `<canvas data-cmap="ink" aria-hidden="true"></canvas>` },
+          { id: "layer", label: "Color de capa", desc: "Cada capa se pinta con su propio color; ideal para ver capas encimadas.", pv: () => `<canvas data-cmap="layer" aria-hidden="true"></canvas>` },
+          { id: "inferno", label: "Térmico", desc: "Paleta científica clásica de oscuro a amarillo; máximo detalle.", pv: () => `<canvas data-cmap="inferno" aria-hidden="true"></canvas>` },
+          { id: "dither", label: "1 bit (dither)", desc: "Solo puntos negros, como una pantalla monocromática antigua.", pv: () => `<canvas data-cmap="dither" aria-hidden="true"></canvas>` },
+        ] },
+      { id: "layout", title: "¿Cómo se organizan las 4 capas?", help: "Esquema de la ventana principal. R = resultado.",
+        options: [
+          { id: "grid", label: "Cuadrícula 2 × 2", desc: "Las cuatro capas visibles a la vez y el resultado abajo.",
+            pv: LAYOUT("1fr 1fr", "1fr 1fr 0.7fr", P => [P.o, P.g, P.b, P.p].map(c => `<div style="background:#fff;border-color:${c};border-width:2px"></div>`).join("") + `<div style="grid-column:1/3;background:#fff;display:grid;place-items:center;font:600 10px 'IBM Plex Mono'">R</div>`) },
+          { id: "focus", label: "Una pantalla grande", desc: "Una capa a la vez en grande, con pestañas de color para cambiar.",
+            pv: LAYOUT("1fr", "14px 1fr", P => `<div style="display:flex;gap:3px;border:none">${[P.o, P.g, P.b, P.p].map((c, i) => `<span style="flex:1;background:${c};opacity:${i ? .35 : 1}"></span>`).join("")}<span style="flex:1;border:1px solid #141414;font:600 8px 'IBM Plex Mono';display:grid;place-items:center">R</span></div><div style="background:#fff;border-color:${P.o};border-width:2px"></div>`) },
+          { id: "lanes", label: "Carriles", desc: "Capas apiladas como pistas de un DAW, alineadas en el tiempo.",
+            pv: LAYOUT("1fr", "1fr 1fr 1fr 1fr 1fr", P => [P.o, P.g, P.b, P.p].map(c => `<div style="background:#fff;border-left:6px solid ${c}"></div>`).join("") + `<div style="background:#fff;font:600 8px 'IBM Plex Mono';display:grid;place-items:center">R</div>`) },
+          { id: "overlay", label: "Encimadas", desc: "Todas las capas en una sola pantalla, cada una en su color.",
+            pv: LAYOUT("1fr", "1fr", P => `<div style="background:#fff;position:relative">${[P.o, P.g, P.b, P.p].map((c, i) => `<span style="position:absolute;left:${8 + i * 14}%;top:${12 + i * 16}%;width:38%;height:30%;background:${c};opacity:.55"></span>`).join("")}</div>`) },
+        ] },
+    ] },
+    { title: "D · Comportamiento", qs: [
+      { id: "motion", title: "¿Cuánta animación?", options: [
+          { id: "none", label: "Nada", desc: "Todo cambia al instante. Máxima seriedad.", pv: (P) => knobRow("encoder", P) },
+          { id: "subtle", label: "Sutil", desc: "Solo lo que informa: el cursor de reproducción, valores que se actualizan.", pv: (P) => `<div style="width:90%;height:60px;background:#fff;border:1px solid #141414;position:relative"><span class="anim-play" style="position:absolute;top:0;bottom:0;width:2px;background:${P.o};left:30%"></span></div>` },
+          { id: "playful", label: "Juguetona", desc: "Perillas con rebote, transiciones con personalidad.", pv: (P) => `<div class="mini-panel" style="background:${P.bg}">${knob("encoder", P.p, .5, "anim-bounce")}${knob("encoder", P.g, .3)}</div>` },
+        ] },
+      { id: "labels", title: "¿Cómo se escriben las etiquetas?", options: [
+          { id: "abbr", label: "Abreviadas en mayúsculas", desc: "Como en el hardware: códigos cortos que se aprenden.", pv: () => `<div class="mono" style="font-size:13px;display:grid;gap:4px;text-align:left;padding:10px">ATK 12ms · REL 300ms<br>WIN HANN · N 4096<br>PCH +3 · OFS 0.25s</div>` },
+          { id: "words", label: "Palabras completas", desc: "Más claro al primer uso, ocupa más espacio.", pv: () => `<div style="font:13px 'Archivo';display:grid;gap:4px;text-align:left;padding:10px">Attack 12 ms · Release 300 ms<br>Window Hann · FFT size 4096<br>Pitch +3 st · Offset 0.25 s</div>` },
+          { id: "icons", label: "Íconos + valores", desc: "Símbolos para cada parámetro y solo el número al lado.", pv: () => `<div class="mono" style="font-size:13px;display:grid;gap:4px;text-align:left;padding:10px">⟋ 12 · ⟍ 300<br>⌒ HANN · ▦ 4096<br>♯ +3 · → 0.25</div>` },
+        ] },
+      { id: "size", title: "¿De qué tamaño es la ventana?", help: "En FL Studio, la ventana del plugin flota sobre el proyecto.",
+        options: [
+          { id: "small", label: "Compacta", desc: "Alrededor de 900 × 600: cabe junto al Channel Rack.", pv: () => `<div style="width:90%;height:84px;border:1px dashed #141414;display:grid;place-items:center"><div style="width:45%;height:55%;background:#141414"></div></div>` },
+          { id: "medium", label: "Mediana", desc: "Alrededor de 1200 × 800: el espectrograma respira.", pv: () => `<div style="width:90%;height:84px;border:1px dashed #141414;display:grid;place-items:center"><div style="width:65%;height:72%;background:#141414"></div></div>` },
+          { id: "resizable", label: "Redimensionable", desc: "La arrastras al tamaño que quieras, incluso pantalla completa.", pv: () => `<div style="width:90%;height:84px;border:1px dashed #141414;display:grid;place-items:center"><div style="width:65%;height:72%;background:#141414;position:relative"><span style="position:absolute;right:-6px;bottom:-6px;width:12px;height:12px;background:#fff;border:2px solid #141414"></span></div></div>` },
+        ] },
+    ] },
+  ];
+  const TEXTS = [
+    { id: "adjectives", title: "Tres adjetivos", help: "¿Cómo quieres que se sienta usar Fourierizer? Por ejemplo: preciso, juguetón, misterioso, científico, cálido…" },
+    { id: "love", title: "Interfaces que te encantan", help: "Plugins, apps, hardware o incluso objetos que no son de música. ¿Qué te gusta de cada uno?" },
+    { id: "avoid", title: "Lo que no quieres ver", help: "Ya sé: degradados y la estética tipo Serum. ¿Algo más?" },
+    { id: "other", title: "Cualquier otra cosa", help: "Ideas sueltas, imágenes que tengas en la cabeza, cómo te imaginas el botón de \"Fourierize\"…" },
+  ];
+
+  // ---------- render ----------
+  const form = document.getElementById("form");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function build() {
+    const P = palette();
+    form.innerHTML = GROUPS.map(g => `<section class="group"><h2>${g.title}</h2>${g.qs.map(q => `
+      <div class="q" data-q="${q.id}">
+        <h3>${q.title}</h3>${q.help ? `<p class="help">${q.help}</p>` : ""}
+        <div class="opts">${q.options.map(o => `
+          <button class="opt" type="button" data-q="${q.id}" data-o="${o.id}" aria-pressed="${state.answers[q.id] === o.id}">
+            <div class="pv">${o.pv(P)}</div>
+            <div class="lab"><span>${o.label}</span><span class="tick">ELEGIDA</span></div>
+            <div class="desc">${o.desc}</div>
+          </button>`).join("")}</div>
+        <details class="note"${state.notes[q.id] ? " open" : ""}><summary>Agregar comentario</summary>
+          <textarea id="note_${q.id}" data-note="${q.id}" aria-label="Comentario sobre: ${esc(q.title)}">${esc(state.notes[q.id] || "")}</textarea></details>
+      </div>`).join("")}</section>`).join("") +
+      `<section class="group"><h2>E · Tus palabras</h2>${TEXTS.map(t => `
+      <div class="q"><h3>${t.title}</h3><p class="help">${t.help}</p>
+        <textarea id="text_${t.id}" data-text="${t.id}" aria-label="${esc(t.title)}">${esc(state.text[t.id] || "")}</textarea></div>`).join("")}</section>`;
+    form.querySelectorAll("canvas[data-cmap]").forEach(c => drawSpec(c, c.dataset.cmap, P));
+    paintHeader();
+  }
+  function paintHeader() {
+    const P = palette();
+    document.getElementById("strip").innerHTML = [["1", P.o], ["2", P.g], ["3", P.b], ["4", P.p]].map(([n, c]) => `<span style="background:${c}">L${n}</span>`).join("") + `<span class="bgchip" style="background:${P.bg}">FONDO</span>`;
+    const total = GROUPS.reduce((n, g) => n + g.qs.length, 0);
+    const done = Object.keys(state.answers).length;
+    document.getElementById("progress").innerHTML = `<b>${done}</b> de ${total} módulos elegidos${state.done ? " · marcado como terminado" : ""}`;
+  }
+
+  form.addEventListener("click", e => {
+    const b = e.target.closest(".opt"); if (!b) return;
+    const q = b.dataset.q, o = b.dataset.o;
+    state.answers[q] = o;
+    const y = window.scrollY;
+    if (q.startsWith("c_") || q === "bg") { build(); window.scrollTo(0, y); }   // la paleta afecta todas las vistas previas
+    else { form.querySelectorAll(`.opt[data-q="${q}"]`).forEach(x => x.setAttribute("aria-pressed", String(x.dataset.o === o))); paintHeader(); }
+    save();
+  });
+  form.addEventListener("input", e => {
+    const t = e.target;
+    if (t.dataset.note) state.notes[t.dataset.note] = t.value;
+    else if (t.dataset.text) state.text[t.dataset.text] = t.value;
+    else return;
+    save();
+  });
+  document.getElementById("done").addEventListener("click", () => {
+    state.done = true; paintHeader();
+    document.getElementById("doneMsg").textContent = "Listo. Avísale a Claude en el chat que ya terminaste.";
+    save(true);
+  });
+
+  // ---------- guardado ----------
+  const statusEl = document.getElementById("status");
+  const setStatus = (msg, kind) => { statusEl.textContent = msg; statusEl.dataset.kind = kind; };
+  let ref = null, timer = null, inflight = false, pending = false;
+  function save(now) {
+    if (!ref) { setStatus("Sin conexión al guardado: tus respuestas solo viven en esta pestaña", "warn"); return; }
+    setStatus("Guardando…", "warn");
+    clearTimeout(timer); timer = setTimeout(flush, now ? 0 : 700);
+  }
+  async function flush() {
+    if (inflight) { pending = true; return; }
+    inflight = true;
+    try {
+      await ref.set({ answers: state.answers, notes: state.notes, text: state.text, done: state.done, updatedAt: new Date().toISOString() });
+      setStatus("Guardado", "ok");
+    } catch (e) {
+      setStatus(e && e.code === "invalid_argument" ? "Solo lectura: no puedes guardar en esta página" : "No se pudo guardar; se reintentará con tu próximo cambio", "warn");
+    }
+    inflight = false;
+    if (pending) { pending = false; flush(); }
+  }
+
+  build();
+  (async () => {
+    for (let i = 0; i < 30 && !window.claude; i++) await new Promise(r => setTimeout(r, 100));
+    const db = window.claude ? await window.claude.use("db") : null;
+    if (!db) { setStatus("Sin conexión al guardado: tus respuestas solo viven en esta pestaña", "warn"); return; }
+    ref = db.doc("brief/answers");
+    const to = setTimeout(() => setStatus("El guardado tarda en responder…", "warn"), 10000);
+    try {
+      const snap = await ref.get();
+      clearTimeout(to);
+      if (snap.exists) {
+        const d = snap.data();
+        // lo que ya tocaste en esta pestaña gana sobre lo guardado
+        state.answers = { ...(d.answers || {}), ...state.answers };
+        state.notes = { ...(d.notes || {}), ...state.notes };
+        state.text = { ...(d.text || {}), ...state.text };
+        state.done = state.done || !!d.done;
+        const y = window.scrollY; build(); window.scrollTo(0, y);
+      }
+      setStatus("Conectado · se guarda solo", "ok");
+    } catch (e) {
+      clearTimeout(to);
+      setStatus("No se pudieron cargar respuestas previas", "warn");
+    }
+  })();
+})();
+</script>
