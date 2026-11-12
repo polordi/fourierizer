@@ -1,50 +1,11 @@
 <!-- @dsCard group="Modules" height=230 subtitle="One of the four source slots: identity, file, state and quick actions" -->
-<div class="fz fz-chassis" id="root" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px"></div>
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>LayerSlot preview</title></head>
+<body style="margin:0">
+<div id="root" class="fz fz-chassis"></div>
 <script>
-(() => {
-  const ICON = {
-    load: '<svg viewBox="0 0 16 16"><path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M2 13h12"/></svg>',
-    rec: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="4"/></svg>',
-    mute: '<svg viewBox="0 0 16 16"><path d="M2 6h3l4-3v10L5 10H2z"/><path d="M11 6l3 4M14 6l-3 4"/></svg>',
-    solo: '<svg viewBox="0 0 16 16"><path d="M2 6h3l4-3v10L5 10H2z"/><path d="M11.5 5.5a4 4 0 0 1 0 5"/></svg>',
-  };
-  const SLOTS = [
-    { layer: 1, name: "Lead Piano.wav", meta: "48.0 kHz · 3.84 s · ST", loaded: true },
-    { layer: 2, name: "", meta: "", loaded: false },
-  ];
-  const root = document.getElementById("root");
-  SLOTS.forEach(s => {
-    const el = document.createElement("div");
-    el.className = `fz-module fz-l${s.layer}`;
-    el.style.display = "grid"; el.style.gap = "12px"; el.style.paddingTop = "22px";
-    el.innerHTML = `<span class="fz-screw tl"></span><span class="fz-screw tr"></span><span class="fz-screw bl"></span><span class="fz-screw br"></span>
-      <div style="display:flex;align-items:center;gap:10px;min-width:0">
-        <span style="width:28px;height:28px;flex:none;display:grid;place-items:center;background:var(--layer);color:var(--on-layer);border:1.5px solid var(--ink,#16181A);border-radius:var(--radius-sm,3px);font:600 14px var(--font-mono,monospace)">${s.layer}</span>
-        <div style="min-width:0;display:grid">
-          <span style="font:600 16px/20px var(--font-sans,sans-serif);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.name || "Empty slot"}</span>
-          <span class="fz-readout-sm">${s.meta || "Drop a sound or capture from the mixer"}</span>
-        </div>
-        <span class="fz-led" data-on="${s.loaded}" style="margin-left:auto;flex:none" title="${s.loaded ? "Loaded" : "Empty"}"></span>
-      </div>
-      <div class="fz-display" style="height:56px">${s.loaded ? '<canvas style="width:100%;height:100%;display:block"></canvas>' : '<div style="height:100%;display:grid;place-items:center" class="fz-silk">Drop audio here</div>'}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="fz-key" type="button" aria-label="Load file">${ICON.load}</button>
-        <button class="fz-key" type="button" aria-label="Capture from sidechain">${ICON.rec}<span>Rec</span></button>
-        <span style="flex:1"></span>
-        <button class="fz-key" type="button" aria-pressed="false" aria-label="Mute layer">${ICON.mute}</button>
-        <button class="fz-key" type="button" aria-pressed="false" aria-label="Solo layer">${ICON.solo}</button>
-      </div>`;
-    root.appendChild(el);
-    el.querySelectorAll('.fz-key[aria-pressed]').forEach(k => k.addEventListener("click", () => k.setAttribute("aria-pressed", String(k.getAttribute("aria-pressed") !== "true"))));
-    const c = el.querySelector("canvas");
-    if (c) requestAnimationFrame(() => {
-      const r = c.getBoundingClientRect(), dpr = devicePixelRatio || 1; c.width = r.width * dpr; c.height = r.height * dpr;
-      const g = c.getContext("2d"); g.scale(dpr, dpr); g.strokeStyle = getComputedStyle(el).getPropertyValue("--layer-deep").trim() || "#B85A00"; g.lineWidth = 1;
-      g.beginPath();
-      for (let x = 0; x < r.width; x++) { const t = x / r.width, env = Math.exp(-t * 3.2) * (t < .01 ? t / .01 : 1);
-        const a = env * (0.75 + 0.25 * Math.sin(x * 1.7)) * (r.height / 2 - 4); g.moveTo(x + .5, r.height / 2 - a); g.lineTo(x + .5, r.height / 2 + a); }
-      g.stroke();
-    });
-  });
-})();
+  window.Fourierizer.LayerSlot(document.getElementById("root"));
 </script>
+</body>
+</html>

@@ -1,12 +1,12 @@
 \chapter{Ventanas}\label{cap:ventanas}
 
-La transformada de Fourier de tiempo corto no analiza una señal completa, sino fragmentos de
-ella. En la tesis definimos la TFTC como
+La transformada de Fourier de tiempo corto (STFT) no analiza una señal completa, sino fragmentos
+de ella:
 \[
-  \chi(m,k)=\sum_{n=0}^{L-1}x[n+mH]\,w[n]\,\e^{-2\pi\iu kn/N},
+  \chi(m,k)=\sum_{n=0}^{L-1}x[n+mH]\,w[n]\,\e^{-2\pi\iu kn/N}.
 \]
-y tratamos la ventana $w$ como un detalle de implementación: una función que vale entre $0$ y $1$
-y que ``suaviza los cortes''. En este capítulo mostramos que la ventana es mucho más que eso.
+Es tentador ver la ventana $w$ como un detalle de implementación: una función que vale entre $0$ y
+$1$ y que ``suaviza los cortes''. En este capítulo mostramos que es mucho más que eso.
 \textbf{La ventana determina cómo se ve cada componente del sonido en el espectrograma}, y por lo
 tanto qué tan limpia puede ser una selección.
 

@@ -1,26 +1,11 @@
 <!-- @dsCard group="Actions" height=170 subtitle="The one primary action: render the synthesis. Four LEDs show the layers rendering." -->
-<div class="fz fz-chassis" id="root" style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-  <button class="fz-key fz-focus" id="go" type="button" style="min-height:64px;padding:0 28px;font-size:15px;letter-spacing:.12em;gap:12px">
-    <svg viewBox="0 0 16 16" style="width:20px;height:20px" aria-hidden="true"><path d="M1 8c1.5-5 3-5 4.5 0s3 5 4.5 0 3-5 4.5 0"/></svg>Fourierize
-  </button>
-  <div style="display:grid;gap:6px">
-    <div style="display:flex;gap:8px" id="leds">
-      <span class="fz-led fz-l1"></span><span class="fz-led fz-l2"></span><span class="fz-led fz-l3"></span><span class="fz-led fz-l4"></span>
-    </div>
-    <span class="fz-readout-sm" id="msg" aria-live="polite">Ready · 4 layers</span>
-  </div>
-</div>
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>FourierizeKey preview</title></head>
+<body style="margin:0">
+<div id="root" class="fz fz-chassis"></div>
 <script>
-(() => {
-  const go = document.getElementById("go"), leds = [...document.querySelectorAll("#leds .fz-led")], msg = document.getElementById("msg");
-  let busy = false;
-  go.addEventListener("click", async () => {
-    if (busy) return; busy = true; go.setAttribute("aria-pressed", "true");
-    leds.forEach(l => l.dataset.on = "false"); msg.textContent = "Rendering…";
-    const t0 = performance.now();
-    for (const l of leds) { await new Promise(r => setTimeout(r, 140)); l.dataset.on = "true"; }
-    msg.textContent = `Done · ${((performance.now() - t0) / 1000).toFixed(2)} s · −0.3 dBFS peak`;
-    go.setAttribute("aria-pressed", "false"); busy = false;
-  });
-})();
+  window.Fourierizer.FourierizeKey(document.getElementById("root"));
 </script>
+</body>
+</html>
