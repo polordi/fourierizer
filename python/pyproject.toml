@@ -1,0 +1,19 @@
+[project]
+name = "fourierizer-ref"
+version = "0.1.0"
+description = "Reference implementation of the Fourierizer synthesis engine (STFT selection synthesis)."
+requires-python = ">=3.11"
+dependencies = ["numpy>=2.0", "scipy>=1.13", "soundfile>=0.12"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "matplotlib>=3.9"]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["fourierizer_ref"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

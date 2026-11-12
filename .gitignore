@@ -10,3 +10,7 @@ out/
 node_modules/
 .vs/
 *.user
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
