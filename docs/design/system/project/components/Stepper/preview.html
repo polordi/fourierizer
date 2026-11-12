@@ -1,0 +1,30 @@
+<!-- @dsCard group="Controls" height=170 subtitle="Exact or discrete values, with the derived physics underneath" -->
+<div class="fz fz-chassis" id="root" style="display:flex;flex-wrap:wrap;gap:24px"></div>
+<script>
+(() => {
+  const FS = 48000;
+  const NOTES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+  const STEPPERS = [
+    { silk: "FFT SIZE N", v: 12, min: 8, max: 14, show: v => 2 ** v, derived: v => `${(2 ** v / FS * 1000).toFixed(1)} ms · Δf ${(FS / 2 ** v).toFixed(1)} Hz` },
+    { silk: "HOP H", v: 2, min: 1, max: 3, show: v => 4096 / 2 ** v, derived: v => `overlap ${100 - 100 / 2 ** v}% · ${(4096 / 2 ** v / FS * 1000).toFixed(1)} ms` },
+    { silk: "PITCH", v: 3, min: -24, max: 24, show: v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + " st", derived: v => `ratio ×${(2 ** (v / 12)).toFixed(3)}` },
+    { silk: "ROOT", v: 60, min: 0, max: 127, show: v => NOTES[v % 12] + (Math.floor(v / 12) - 1), derived: v => `MIDI ${v} · ${(440 * 2 ** ((v - 69) / 12)).toFixed(1)} Hz` },
+  ];
+  const root = document.getElementById("root");
+  STEPPERS.forEach(s => {
+    const el = document.createElement("div");
+    el.className = "fz-stepper";
+    el.innerHTML = `<span class="fz-silk">${s.silk}</span>
+      <div class="fz-stepper__body"><button class="fz-stepper__btn" type="button" aria-label="Decrease ${s.silk}">−</button>
+        <div class="fz-stepper__val fz-readout-lg" aria-live="polite"></div>
+        <button class="fz-stepper__btn" type="button" aria-label="Increase ${s.silk}">+</button></div>
+      <span class="fz-readout-sm"></span>`;
+    root.appendChild(el);
+    const [dec, inc] = el.querySelectorAll("button"), val = el.querySelector(".fz-stepper__val"), der = el.querySelector(".fz-readout-sm");
+    const paint = () => { val.textContent = s.show(s.v); der.textContent = s.derived(s.v); dec.disabled = s.v <= s.min; inc.disabled = s.v >= s.max; };
+    dec.addEventListener("click", () => { s.v = Math.max(s.min, s.v - 1); paint(); });
+    inc.addEventListener("click", () => { s.v = Math.min(s.max, s.v + 1); paint(); });
+    paint();
+  });
+})();
+</script>

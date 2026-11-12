@@ -1,0 +1,45 @@
+<!-- @dsCard group="Controls" height=200 subtitle="Continuous values tuned by ear: envelope, feather, gain" -->
+<div class="fz fz-chassis" id="root" style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start"></div>
+<script>
+(() => {
+  const ICON = {
+    attack: '<svg viewBox="0 0 14 14"><path d="M1 12 L6 2 L13 2"/></svg>',
+    release: '<svg viewBox="0 0 14 14"><path d="M1 2 L7 2 L13 12"/></svg>',
+    feather: '<svg viewBox="0 0 14 14"><path d="M1 12 C5 12 5 2 13 2"/></svg>',
+    gain: '<svg viewBox="0 0 14 14"><path d="M1 12 L13 12 L13 2 Z"/></svg>',
+  };
+  const KNOBS = [
+    { layer: 1, icon: "attack", silk: "ATK", v: 0.18, def: 0.1, fmt: v => `${Math.round(1 + v * v * 1999)} ms` },
+    { layer: 2, icon: "release", silk: "REL", v: 0.4, def: 0.3, fmt: v => `${Math.round(5 + v * v * 4995)} ms` },
+    { layer: 3, icon: "feather", silk: "FTHR", v: 0.25, def: 0.15, fmt: v => `${Math.round(v * 100)} %` },
+    { layer: 4, icon: "gain", silk: "GAIN", v: 0.66, def: 0.707, fmt: v => v < 0.005 ? "−∞ dB" : `${(20 * Math.log10(2 * v * v)).toFixed(1).replace("-", "−")} dB` },
+  ];
+  const root = document.getElementById("root");
+  const ticks = () => Array.from({ length: 11 }, (_, i) => {
+    const a = (-135 + i * 27 - 90) * Math.PI / 180, r0 = 31, r1 = 35;
+    return `<line data-i="${i}" x1="${36 + r0 * Math.cos(a)}" y1="${36 + r0 * Math.sin(a)}" x2="${36 + r1 * Math.cos(a)}" y2="${36 + r1 * Math.sin(a)}" stroke-width="1.5"/>`;
+  }).join("");
+  KNOBS.forEach(k => {
+    const el = document.createElement("div");
+    el.className = `fz-knob fz-l${k.layer}`;
+    el.innerHTML = `<div class="fz-knob__dial fz-focus" tabindex="0" role="slider" aria-label="${k.silk}" aria-valuemin="0" aria-valuemax="1">
+        <svg viewBox="0 0 72 72" aria-hidden="true">${ticks()}</svg><div class="fz-knob__cap"></div></div>
+      <div class="fz-knob__row">${ICON[k.icon]}<span class="fz-readout"></span></div><span class="fz-silk">${k.silk}</span>`;
+    root.appendChild(el);
+    const dial = el.querySelector(".fz-knob__dial"), cap = el.querySelector(".fz-knob__cap"), out = el.querySelector(".fz-readout");
+    const paint = (spring) => {
+      cap.style.transition = spring ? "transform 420ms cubic-bezier(.3,1.7,.45,1)" : "none";   // playful overshoot on jumps only
+      cap.style.transform = `rotate(${-135 + 270 * k.v}deg)`;
+      out.textContent = k.fmt(k.v);
+      dial.setAttribute("aria-valuenow", k.v.toFixed(2)); dial.setAttribute("aria-valuetext", k.fmt(k.v));
+      dial.querySelectorAll("line").forEach(l => l.setAttribute("stroke", +l.dataset.i <= Math.round(k.v * 10) ? "var(--ink, #16181A)" : "var(--seam, #B7BDC3)"));
+    };
+    let y0 = 0, v0 = 0;
+    dial.addEventListener("pointerdown", e => { dial.setPointerCapture(e.pointerId); y0 = e.clientY; v0 = k.v; });
+    dial.addEventListener("pointermove", e => { if (!dial.hasPointerCapture(e.pointerId)) return; k.v = Math.min(1, Math.max(0, v0 + (y0 - e.clientY) / (e.shiftKey ? 600 : 150))); paint(false); });
+    dial.addEventListener("dblclick", () => { k.v = k.def; paint(true); });
+    dial.addEventListener("keydown", e => { const d = { ArrowUp: .02, ArrowRight: .02, ArrowDown: -.02, ArrowLeft: -.02 }[e.key]; if (d) { e.preventDefault(); k.v = Math.min(1, Math.max(0, k.v + d)); paint(true); } });
+    paint(false);
+  });
+})();
+</script>

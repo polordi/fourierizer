@@ -1,0 +1,29 @@
+<!-- @dsCard group="Controls" height=190 subtitle="One of a set: window function, Tape / Spectral" -->
+<div class="fz fz-chassis" id="root" style="display:grid;gap:20px;justify-items:start"></div>
+<script>
+(() => {
+  // Each icon is the real window function w[n] on n ∈ [0, 1], drawn to scale.
+  const I0 = x => { let s = 1, t = 1; for (let k = 1; k < 30; k++) { t *= (x / (2 * k)) ** 2; s += t; } return s; };
+  const W = {
+    rect: () => 1,
+    hann: n => 0.5 - 0.5 * Math.cos(2 * Math.PI * n),
+    hamming: n => 0.54 - 0.46 * Math.cos(2 * Math.PI * n),
+    bh: n => 0.35875 - 0.48829 * Math.cos(2 * Math.PI * n) + 0.14128 * Math.cos(4 * Math.PI * n) - 0.01168 * Math.cos(6 * Math.PI * n),
+    kaiser: n => I0(8 * Math.sqrt(1 - (2 * n - 1) ** 2)) / I0(8),
+    gauss: n => Math.exp(-0.5 * ((n - 0.5) / (0.4 * 0.5)) ** 2),
+    flat: n => (0.21557895 - 0.41663158 * Math.cos(2 * Math.PI * n) + 0.277263158 * Math.cos(4 * Math.PI * n) - 0.083578947 * Math.cos(6 * Math.PI * n) + 0.006947368 * Math.cos(8 * Math.PI * n)),
+  };
+  const path = f => { let d = ""; let lo = 0; for (let i = 0; i <= 40; i++) lo = Math.min(lo, f(i / 40));
+    for (let i = 0; i <= 40; i++) { const y = f(i / 40); d += `${i ? "L" : "M"}${i} ${(15 - ((y - lo) / (1 - lo)) * 13).toFixed(2)} `; } return d; };
+  const group = (label, opts, sel, icons) => {
+    const wrap = document.createElement("div"); wrap.style.display = "grid"; wrap.style.gap = "6px";
+    wrap.innerHTML = `<span class="fz-silk" id="lab_${label}">${label}</span><div class="fz-seg" role="radiogroup" aria-labelledby="lab_${label}">${opts.map(([id, txt]) =>
+      `<button class="fz-seg__opt" type="button" role="radio" data-id="${id}" aria-checked="${id === sel}">${icons ? `<svg viewBox="0 0 40 16" aria-hidden="true"><path d="${path(W[id])}"/></svg>` : ""}<span>${txt}</span></button>`).join("")}</div>`;
+    wrap.addEventListener("click", e => { const b = e.target.closest(".fz-seg__opt"); if (!b) return; wrap.querySelectorAll(".fz-seg__opt").forEach(x => x.setAttribute("aria-checked", String(x === b))); });
+    return wrap;
+  };
+  const root = document.getElementById("root");
+  root.appendChild(group("WINDOW", [["rect", "Rect"], ["hann", "Hann"], ["hamming", "Hamm"], ["bh", "B-H"], ["kaiser", "Kaiser"], ["gauss", "Gauss"], ["flat", "Flat"]], "hann", true));
+  root.appendChild(group("KEYTRACK", [["tape", "Tape"], ["spectral", "Spectral"]], "tape", false));
+})();
+</script>

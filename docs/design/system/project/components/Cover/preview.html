@@ -1,0 +1,33 @@
+<!-- @dsCard height=288 -->
+<div style="position:relative;width:960px;height:288px;background:var(--chassis,#E4E7EA);overflow:hidden">
+  <svg width="960" height="288" viewBox="0 0 960 288" style="position:absolute;inset:0" aria-hidden="true">
+    <!-- blocks: layer-1 (200×128) · layer-2 (120×96) · layer-3 (120×80) · layer-4 (200×112) · ink (96×288 bleed right) — sides on the 8/16px grid of space-2 / space-4
+         arrangement: a 2×2 module grid like the plugin's layer layout, staggered, ink slab bleeding off the right edge
+         pattern: plus-grid at space-6 (24px) pitch on ground cut-outs — "precise, technical, mono, a 4px grid" matches a lab instrument
+         steps: space-6 24, space-8 32, space-12 48; radii: radius-md 6 on blocks, radius-round on the screws -->
+    <style>
+      .l1{fill:var(--layer-1,#F28C28)} .l2{fill:var(--layer-2,#10A04A)} .l3{fill:var(--layer-3,#0085CA)} .l4{fill:var(--layer-4,#7A3FD1)}
+      .ink{fill:var(--ink,#16181A)} .blk{rx:var(--radius-md,6px);stroke:var(--ink,#16181A);stroke-width:var(--stroke-line,1.5px)}
+      .plus{stroke:var(--ink-muted,#5A6068);stroke-width:var(--stroke-hair,1px)}
+      .screw{fill:var(--chassis,#E4E7EA);stroke:var(--ink,#16181A);stroke-width:1.5}
+    </style>
+    <g id="plus"></g>
+    <rect class="l1 blk" x="504" y="32" width="200" height="128"/>
+    <rect class="l2 blk" x="720" y="32" width="120" height="96"/>
+    <rect class="l3 blk" x="504" y="176" width="120" height="80"/>
+    <rect class="l4 blk" x="640" y="144" width="200" height="112"/>
+    <rect class="ink" x="864" y="0" width="96" height="288"/>
+    <circle class="screw" cx="516" cy="44" r="4.5"/><circle class="screw" cx="828" cy="244" r="4.5"/>
+  </svg>
+  <div style="position:absolute;left:48px;bottom:40px;max-width:440px;display:grid;gap:10px">
+    <div style="font:800 64px/.92 var(--font-sans,'Archivo',sans-serif);letter-spacing:-.02em;color:var(--ink,#16181A)">Fourierizer</div>
+    <div style="font:400 14px/20px var(--font-sans,'Archivo',sans-serif);color:var(--ink-muted,#5A6068)">A laboratory instrument for designing sounds from their spectra.</div>
+  </div>
+</div>
+<script>
+(() => {
+  const g = document.getElementById("plus"); let s = "";
+  for (let x = 492; x < 864; x += 24) for (let y = 12; y < 288; y += 24) s += `<path class="plus" d="M${x - 3} ${y}h6M${x} ${y - 3}v6"/>`;
+  g.innerHTML = s;
+})();
+</script>

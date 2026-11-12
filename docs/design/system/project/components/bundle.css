@@ -1,0 +1,80 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap");
+
+/* Fourierizer components. Every value comes from tokens.json; the fallbacks only cover a frame
+   that has not loaded tokens.css yet. Layer identity is set with .fz-l1 … .fz-l4. */
+
+.fz { font-family: var(--font-sans, "Archivo", Arial, sans-serif); color: var(--ink, #16181A); -webkit-font-smoothing: antialiased; }
+.fz *, .fz *::before, .fz *::after { box-sizing: border-box; }
+.fz-chassis { background: var(--chassis, #E4E7EA); padding: var(--space-6, 24px); }
+
+.fz-l1 { --layer: var(--layer-1, #F28C28); --layer-deep: var(--layer-1-deep, #B85A00); --on-layer: var(--on-layer-1, #16181A); }
+.fz-l2 { --layer: var(--layer-2, #10A04A); --layer-deep: var(--layer-2-deep, #0B7A36); --on-layer: var(--on-layer-2, #16181A); }
+.fz-l3 { --layer: var(--layer-3, #0085CA); --layer-deep: var(--layer-3-deep, #006A9E); --on-layer: var(--on-layer-3, #16181A); }
+.fz-l4 { --layer: var(--layer-4, #7A3FD1); --layer-deep: var(--layer-4-deep, #6330B0); --on-layer: var(--on-layer-4, #FFFFFF); }
+
+/* type roles */
+.fz-silk { font: 600 11px/14px var(--font-sans, "Archivo", sans-serif); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-muted, #5A6068); }
+.fz-readout { font: 400 13px/18px var(--font-mono, "IBM Plex Mono", monospace); font-variant-numeric: tabular-nums; }
+.fz-readout-lg { font: 600 22px/26px var(--font-mono, "IBM Plex Mono", monospace); font-variant-numeric: tabular-nums; }
+.fz-readout-sm { font: 400 10px/12px var(--font-mono, "IBM Plex Mono", monospace); font-variant-numeric: tabular-nums; color: var(--ink-muted, #5A6068); }
+
+/* module: a raised panel with seams and screws */
+.fz-module { position: relative; background: var(--panel, #F3F5F6); border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); border-radius: var(--radius-md, 6px); padding: var(--space-4, 16px); }
+.fz-screw { position: absolute; width: 9px; height: 9px; border-radius: var(--radius-round, 9999px); border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); background: var(--panel, #F3F5F6); }
+.fz-screw::after { content: ""; position: absolute; left: 1px; right: 1px; top: 2.5px; height: 1.5px; background: var(--ink, #16181A); transform: rotate(-35deg); }
+.fz-screw.tl { left: 6px; top: 6px; } .fz-screw.tr { right: 6px; top: 6px; } .fz-screw.bl { left: 6px; bottom: 6px; } .fz-screw.br { right: 6px; bottom: 6px; }
+.fz-seam { height: var(--stroke-hair, 1px); background: var(--seam, #B7BDC3); }
+
+/* key: a physical push button */
+.fz-key { all: unset; box-sizing: border-box; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2, 8px);
+  min-height: 36px; padding: 0 var(--space-3, 12px); background: var(--panel, #F3F5F6); color: var(--ink, #16181A);
+  border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); border-radius: var(--radius-sm, 3px); box-shadow: var(--shadow-key, 0 3px 0 #16181A);
+  font: 600 13px/16px var(--font-sans, "Archivo", sans-serif); letter-spacing: .06em; text-transform: uppercase;
+  transition: transform 90ms ease-out, box-shadow 90ms ease-out; user-select: none; }
+.fz-key:active, .fz-key[aria-pressed="true"] { transform: translateY(3px); box-shadow: var(--shadow-key-pressed, 0 0 0 #16181A); }
+.fz-key[aria-pressed="true"] { background: var(--ink, #16181A); color: var(--on-ink, #F3F5F6); }
+.fz-key:focus-visible, .fz-focus:focus-visible { outline: var(--stroke-bold, 2px) solid var(--ink, #16181A); outline-offset: 3px; }
+.fz-key svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* knob */
+.fz-knob { display: inline-grid; justify-items: center; gap: var(--space-1, 4px); width: 84px; user-select: none; touch-action: none; }
+.fz-knob__dial { position: relative; width: 72px; height: 72px; cursor: ns-resize; }
+.fz-knob__dial > svg { position: absolute; inset: 0; }
+.fz-knob__cap { position: absolute; left: 12px; top: 12px; width: 48px; height: 48px; border-radius: var(--radius-round, 9999px); background: var(--layer, #F28C28);
+  border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); box-shadow: var(--shadow-key, 0 3px 0 #16181A); }
+.fz-knob__cap::after { content: ""; position: absolute; left: calc(50% - 1.5px); top: 4px; width: 3px; height: 14px; border-radius: 2px; background: var(--on-layer, #16181A); }
+.fz-knob__row { display: flex; align-items: center; gap: var(--space-1, 4px); }
+.fz-knob__row svg { width: 14px; height: 14px; stroke: var(--ink, #16181A); stroke-width: 1.5; fill: none; }
+
+/* fader */
+.fz-fader { display: inline-grid; justify-items: center; gap: var(--space-2, 8px); width: 56px; user-select: none; touch-action: none; }
+.fz-fader__slot { position: relative; width: 36px; height: 150px; cursor: ns-resize; }
+.fz-fader__track { position: absolute; left: 15px; top: 0; bottom: 0; width: 6px; border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); background: var(--display, #FFFFFF); }
+.fz-fader__fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--layer, #F28C28); }
+.fz-fader__cap { position: absolute; left: 2px; width: 32px; height: 16px; background: var(--ink, #16181A); border-radius: var(--radius-sm, 3px); }
+.fz-fader__cap::after { content: ""; position: absolute; left: 6px; right: 6px; top: 7px; height: 2px; background: var(--layer, #F28C28); }
+
+/* stepper: exact numeric value with − / + */
+.fz-stepper { display: inline-grid; gap: var(--space-1, 4px); }
+.fz-stepper__body { display: grid; grid-template-columns: 32px minmax(76px, auto) 32px; align-items: stretch; border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); border-radius: var(--radius-sm, 3px); background: var(--display, #FFFFFF); }
+.fz-stepper__btn { all: unset; cursor: pointer; display: grid; place-items: center; font: 600 16px/1 var(--font-mono, monospace); }
+.fz-stepper__btn:hover { background: var(--chassis, #E4E7EA); }
+.fz-stepper__btn:focus-visible { outline: var(--stroke-bold, 2px) solid var(--ink, #16181A); outline-offset: 2px; }
+.fz-stepper__val { padding: 6px 8px; text-align: center; border-inline: var(--stroke-hair, 1px) solid var(--seam, #B7BDC3); }
+
+/* segmented selector */
+.fz-seg { display: inline-flex; flex-wrap: wrap; gap: 0; border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); border-radius: var(--radius-sm, 3px); background: var(--panel, #F3F5F6); overflow: hidden; }
+.fz-seg__opt { all: unset; cursor: pointer; display: grid; justify-items: center; gap: 2px; padding: 6px 10px; min-width: 56px; font: 600 11px/14px var(--font-sans, sans-serif); letter-spacing: .06em; text-transform: uppercase; }
+.fz-seg__opt + .fz-seg__opt { border-left: var(--stroke-hair, 1px) solid var(--seam, #B7BDC3); }
+.fz-seg__opt[aria-checked="true"] { background: var(--ink, #16181A); color: var(--on-ink, #F3F5F6); }
+.fz-seg__opt:focus-visible { outline: var(--stroke-bold, 2px) solid var(--layer-3-deep, #006A9E); outline-offset: -4px; }
+.fz-seg__opt svg { width: 40px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* LED */
+.fz-led { width: 8px; height: 8px; border-radius: var(--radius-round, 9999px); border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); background: var(--panel, #F3F5F6); }
+.fz-led[data-on="true"] { background: var(--layer, #F28C28); }
+
+/* displays */
+.fz-display { position: relative; background: var(--display, #FFFFFF); border: var(--stroke-line, 1.5px) solid var(--ink, #16181A); border-radius: var(--radius-0, 0px); }
+
+@media (prefers-reduced-motion: reduce) { .fz * { transition: none !important; animation: none !important; } }

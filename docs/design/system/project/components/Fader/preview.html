@@ -1,0 +1,31 @@
+<!-- @dsCard group="Controls" height=260 subtitle="Levels compared side by side: the 4-layer mix" -->
+<div class="fz fz-chassis" id="root" style="display:flex;gap:16px;align-items:flex-end"></div>
+<script>
+(() => {
+  const root = document.getElementById("root");
+  const db = v => v < 0.005 ? "−∞" : (20 * Math.log10(2 * v * v)).toFixed(1).replace("-", "−");
+  [0.707, 0.55, 0.8, 0.35].forEach((v0, i) => {
+    let v = v0;
+    const el = document.createElement("div");
+    el.className = `fz-fader fz-l${i + 1}`;
+    el.innerHTML = `<span class="fz-readout"></span>
+      <div class="fz-fader__slot fz-focus" tabindex="0" role="slider" aria-label="Layer ${i + 1} level" aria-valuemin="0" aria-valuemax="1">
+        <div class="fz-fader__track"><div class="fz-fader__fill"></div></div><div class="fz-fader__cap"></div></div>
+      <span class="fz-silk">L${i + 1}</span>`;
+    root.appendChild(el);
+    const slot = el.querySelector(".fz-fader__slot"), fill = el.querySelector(".fz-fader__fill"), cap = el.querySelector(".fz-fader__cap"), out = el.querySelector(".fz-readout");
+    const H = 150, C = 16;
+    const paint = () => {
+      const y = (1 - v) * (H - C);
+      cap.style.top = `${y}px`; fill.style.height = `${(H - y - C / 2) - 3}px`;
+      out.textContent = `${db(v)} dB`;
+      slot.setAttribute("aria-valuenow", v.toFixed(2)); slot.setAttribute("aria-valuetext", `${db(v)} dB`);
+    };
+    slot.addEventListener("pointerdown", e => { slot.setPointerCapture(e.pointerId); move(e); });
+    slot.addEventListener("pointermove", e => { if (slot.hasPointerCapture(e.pointerId)) move(e); });
+    function move(e) { const r = slot.getBoundingClientRect(); v = Math.min(1, Math.max(0, 1 - (e.clientY - r.top - C / 2) / (H - C))); paint(); }
+    slot.addEventListener("keydown", e => { const d = { ArrowUp: .02, ArrowDown: -.02 }[e.key]; if (d) { e.preventDefault(); v = Math.min(1, Math.max(0, v + d)); paint(); } });
+    paint();
+  });
+})();
+</script>
