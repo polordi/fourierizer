@@ -37,7 +37,7 @@ Las partes matemáticas van directo en notación formal.
 | D1 | Tipo de plugin | **Instrumento VST3**, con entrada de audio auxiliar para grabar desde el DAW (§3.2) |
 | D2 | Cómo se toca | **Switch Tape / Spectral** en la interfaz (confirmado). Tape sale en la v2.0 (H5); Spectral es la prioridad inmediata siguiente (H6). Export a WAV/arrastrar (§3.1) |
 | D3 | Automatización | No es objetivo. Los parámetros de reproducción se exponen al host, así que los knobs del controlador funcionan gratis (§3.7) |
-| D4 | Fuentes | Arrastrar archivos **y** grabar audio del DAW |
+| D4 | Fuentes | Arrastrar archivos **y** grabar audio del DAW. **Resuelto por el spike H0 (2026-11-12):** FL Studio no da entrada de audio a generadores, así que la captura se hace con un plugin compañero **Fourierizer Capture** (efecto) que escribe en una carpeta compartida. El instrumento conserva su bus sidechain para los hosts que sí lo enrutan (§3.2) |
 | D5 | Duración máxima por fuente | **60 s** (ajustable si en la práctica sobra o falta) |
 | D6 | Capas | **4 slots** + **iteraciones**: el resultado puede volver como fuente de una nueva síntesis (§3.5) |
 | D7 | Ventanas | Rect, Hann, Hamming, Blackman, Blackman-Harris, Kaiser(β), Gauss(σ) y Flat-top; L, N y H separados; **multirresolución** en un hito posterior (§3.4) |
@@ -75,10 +75,11 @@ Ambas opciones te dejan tocar el resultado como instrumento. Lo que cambia es **
 
 *En simple:* en FL un instrumento vive en el **Channel Rack** y recibe notas. Un efecto vive en el **Mixer** y recibe audio. Fourierizer necesita sobre todo recibir notas, pero también "escuchar" otro canal para grabarlo.
 
-*En técnico:* un solo **VST3 instrument** que declara un **auxiliary (sidechain) input bus**. Con un botón *Capture* en un slot, el plugin graba lo que entra por ese bus. FL soporta enrutar un canal del mixer al sidechain de un plugin, pero **hay que verificar** cómo se comporta con generadores. Es un **spike** (experimento corto) del hito H0. Si FL no lo permite bien, hay dos planes B:
+*En técnico:* un solo **VST3 instrument** que declara un **auxiliary (sidechain) input bus**. Con un botón *Capture* en un slot, el plugin graba lo que entra por ese bus. **Resultado del spike H0 (2026-11-12):** en FL Studio 2026, el wrapper de un generador VST3 **no expone puertos de entrada**, ni con un bus principal (variante A) ni con un bus auxiliar (variante B). Su pestaña *Processing → Connections* muestra solo salidas. Decisión:
 
-1. un plugin compañero, *Fourierizer Capture* (un efecto), que envía audio al instrumento;
-2. el camino universal: grabar en FL (Edison o una pista) y arrastrar el clip al slot. Este siempre funciona.
+1. **Fourierizer Capture**: un plugin compañero de tipo efecto que se inserta en cualquier pista del mixer. Graba lo que pasa por ella y escribe WAVs en una carpeta compartida (p. ej. `Documents/Fourierizer/Captures`). El instrumento vigila la carpeta y muestra un navegador de capturas para cargarlas a un slot. No requiere comunicación entre procesos y funciona igual en cualquier DAW.
+2. El instrumento **conserva su bus sidechain** (cuesta cero y ya está probado), para hosts que sí enrutan audio a instrumentos (Ableton, Reaper, Bitwig).
+3. Siempre se puede grabar en FL (Edison o una pista) y arrastrar el clip al slot.
 
 ### 3.3 Operaciones entre capas: qué son
 
@@ -339,7 +340,7 @@ Tamaño relativo: S / M / L. Cada hito cierra con: demo o entregable, nota en `d
 | **H5 · Plugin MVP = v2.0** | **Definición de terminado** | UI web dentro del plugin, drag & drop de archivos, render en worker, sampler polifónico con ADSR y root note, estado guardado en el `.flp`, export WAV / drag al playlist | **Haces un beat con un sonido fourierizado** | L |
 | **H6 · Modo Spectral** | Tocar sin cambiar la duración | Switch Tape/Spectral funcional: pitch shift espectral (phase vocoder con phase locking) con render por nota cacheado | Comparación A/B Tape vs Spectral | M |
 | **H7 · Capas pro** | Control fino | Pitch y offset por capa, iteraciones ("→ Slot" + historial), presets | Ronda de feedback #2 | M |
-| **H8 · Selección avanzada + multirresolución + captura** | Versatilidad | Pincel, armónica (f₀·k), varita, booleanas; multirresolución por bandas; *Capture* por sidechain (o plan B) | Ronda de feedback #3 | L |
+| **H8 · Selección avanzada + multirresolución + captura** | Versatilidad | Pincel, armónica (f₀·k), varita, booleanas; multirresolución por bandas; plugin compañero **Fourierizer Capture** + navegador de capturas | Ronda de feedback #3 | L |
 | **H9 · Operaciones v2.1** (si decides) | Nuevas síntesis | Cross-synthesis, máximo espectral, etc. Se prueban primero en el demo web (puede adelantarse desde H3); en C++ solo las que te convenzan | Tu veredicto auditivo | M |
 | **H10 · Release 2.0** | Que tus amigos lo usen | Instaladores Win/Mac, licencia decidida, firma (según §3.8), página de descarga, manual de usuario, **documento teórico final en PDF (español) + traducción al inglés** | Un amigo con Mac y uno con Windows lo instalan solos | M |
 | **H11 · Fábrica de plugins** | Reutilizar todo esto | Repo plantilla aparte + **skills de Claude** (§12) | Crear un plugin nuevo "vacío" desde la plantilla en minutos | M |
@@ -393,8 +394,9 @@ Apéndices: notación, demostraciones selectas, tabla de ventanas, glosario mate
 
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
-| WebView dentro de FL (WebView2, foco de teclado, escalado DPI) | UI inestable | Spike en H0; plan B: UI nativa JUCE con el mismo sistema de diseño |
-| FL no enruta bien el sidechain a instrumentos | No hay captura directa | Spike en H0; planes B de §3.2 |
+| WebView dentro de FL (WebView2, foco de teclado, escalado DPI) | UI inestable | ✅ Spike H0: carga y controla parámetros en FL 2026. Quedan por vigilar el foco de teclado y el DPI |
+| FL no enruta el sidechain a instrumentos | No hay captura directa | ⚠️ Confirmado en el spike H0 → plugin compañero Capture (§3.2) |
+| El instalador no coloca el VST3 donde FL lo busca | "No aparece el plugin" | FL registró la carpeta VST3 por usuario como ruta VST2. El instalador del release copia a `C:\Program Files\Common Files\VST3` |
 | Artefactos de máscaras duras | Sonido sucio | Feather por defecto; teoría cap. 5 |
 | Calidad del pitch shift (Tape en notas lejanas, Spectral en transientes) | Instrumento poco usable | Mipmaps; render offline de alta calidad; A/B |
 | Violaciones de tiempo real (clicks) | Inaceptable en producción | Reglas de audio thread, handoff lock-free, pluginval, tests de estrés |

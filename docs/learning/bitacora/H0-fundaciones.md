@@ -49,4 +49,13 @@ Un plugin de prueba (*spike*), **Fourierizer H0 Spike**: un instrumento de onda 
 - ✅ Prueba 1 en FL Studio 2026 (MIDI → sonido).
 - ✅ Prueba 2 en FL Studio 2026 (UI web ↔ parámetro): la WebView2 funciona dentro de FL.
 - ⚠️ FL registró la carpeta de VST3 por usuario como ruta **VST2** (`plugclass = 0` en `HKCU\Software\Image-Line\Shared\Plugin search paths\List\N`; VST3 es `7`) y no veía el plugin. Se corrigió a mano. Lección para el release: el instalador debe copiar el plugin a `C:\Program Files\Common Files\VST3`.
-- ⏳ Prueba 3 en FL (sidechain a un instrumento): pendiente.
+- ❌ Prueba 3 en FL (sidechain a un instrumento). En *Processing → Connections*, el wrapper de FL para generadores solo muestra puertos de salida:
+  - **Variante A:** bus de entrada principal activo. Sin puertos de entrada.
+  - **Variante B:** principal apagado, bus auxiliar (sidechain) activo. Sin puertos de entrada.
+
+  **Decisión:** plugin compañero *Fourierizer Capture* (ver PLAN §3.2).
+
+## Lo que enseña este spike
+
+- *En simple:* cada DAW tiene sus propias reglas sobre qué puede recibir un instrumento. Antes de construir una función que depende del DAW, se prueba con lo mínimo posible. Esta prueba costó una tarde y evitó rediseñar el plugin en el hito H8.
+- *En técnico:* el soporte de **aux/sidechain buses en instrumentos** varía según el host. Que un plugin declare un bus no garantiza que el host lo exponga: el host decide qué buses activa y enruta. Ese es el valor de un **spike**: reducir un riesgo técnico con un experimento desechable antes de comprometer la arquitectura.
