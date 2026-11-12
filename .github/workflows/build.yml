@@ -1,0 +1,82 @@
+# Continuous integration: build every plugin on Windows and macOS, then validate it with
+# pluginval. Runs on every push and pull request; built plugins are attached as artifacts.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            pluginval_zip: pluginval_Windows.zip
+            pluginval_bin: pluginval.exe
+          - name: macOS
+            os: macos-latest
+            pluginval_zip: pluginval_macOS.zip
+            pluginval_bin: pluginval.app/Contents/MacOS/pluginval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: WebView2 SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue | Out-Null
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.1901.177 -Source nugetRepository -Force | Out-Null
+
+      - name: Ninja
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build/release --parallel
+
+      - name: Download pluginval
+        shell: bash
+        run: |
+          curl -sSL -o pluginval.zip "https://github.com/Tracktion/pluginval/releases/latest/download/${{ matrix.pluginval_zip }}"
+          unzip -q -o pluginval.zip -d pluginval
+
+      - name: Validate plugins
+        shell: bash
+        run: |
+          shopt -s nullglob
+          status=0
+          for p in build/release/spikes/*/*_artefacts/Release/VST3/*.vst3; do
+            echo "::group::pluginval $p"
+            "./pluginval/${{ matrix.pluginval_bin }}" --strictness-level 8 --skip-gui-tests --validate-in-process --validate "$p" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload plugins
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ runner.os }}
+          path: build/release/spikes/*/*_artefacts/Release/VST3/*.vst3
+          if-no-files-found: error

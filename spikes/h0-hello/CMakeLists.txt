@@ -5,9 +5,9 @@
 # It uses its own plugin code so it never collides with the real Fourierizer.
 
 juce_add_plugin(FourierizerSpike
-    COMPANY_NAME            "polordi"
-    BUNDLE_ID               "com.polordi.fourierizer.spike"
-    PLUGIN_MANUFACTURER_CODE Plrd
+    COMPANY_NAME            "waves_p"
+    BUNDLE_ID               "com.wavesp.fourierizer.spike"
+    PLUGIN_MANUFACTURER_CODE Wvsp
     PLUGIN_CODE             FzSp
     PRODUCT_NAME            "Fourierizer H0 Spike"
     FORMATS                 VST3 Standalone
