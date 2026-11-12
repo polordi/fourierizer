@@ -37,7 +37,7 @@ Install-WingetPackage "OpenJS.NodeJS.LTS"
 # 5. WebView2 SDK, version documented by JUCE for static linking
 Write-Host "`n==> Microsoft.Web.WebView2 (NuGet)" -ForegroundColor Cyan
 if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue)) {
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null
 }
 if (-not (Get-PackageSource -Name nugetRepository -ErrorAction SilentlyContinue)) {
     Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force | Out-Null
