@@ -1,0 +1,45 @@
+% Fourierizer — Fundamentos matemáticos de la síntesis por selección tiempo-frecuencia
+% Build: latexmk -pdf main.tex   (figures: python/examples/theory_figures.py → generated/)
+\documentclass[11pt,openany]{book}
+\input{preamble}
+
+\title{\textbf{Fourierizer}\\[0.4em]\Large Fundamentos matemáticos de la síntesis\\ por selección tiempo-frecuencia}
+\author{Leopoldo Rodríguez Díaz Infante}
+\date{Borrador · versión 2}
+
+\begin{document}
+\frontmatter
+\maketitle
+\tableofcontents
+
+\chapter*{Cómo leer este documento}
+Este texto es la evolución del marco teórico de la tesis \emph{Fourierizer: combinaciones de
+sonidos a través de la transformada de Fourier de tiempo corto} (ITAM, 2025). Mantiene su rigor
+matemático, pero cada capítulo aterriza sus resultados en decisiones sonoras concretas dentro de
+recuadros como este:
+
+\begin{estudio}
+Los recuadros \emph{En el estudio} traducen un resultado a lo que oyes y a lo que conviene hacer
+en Fourierizer. Si eres productor y no te interesan las demostraciones, puedes leer solo estos
+recuadros y las figuras.
+\end{estudio}
+
+Todas las figuras y tablas numéricas se generan con el motor de referencia del proyecto
+(\texttt{python/fourierizer\_ref}), el mismo contra el que se prueba el plugin.
+
+\mainmatter
+\input{capitulos/01-sonido}
+\input{capitulos/02-fourier}
+\input{capitulos/03-ventanas}
+\input{capitulos/04-stft}
+\input{capitulos/05-mascaras}
+\input{capitulos/06-multirresolucion}
+\input{capitulos/07-transformaciones}
+\input{capitulos/08-operaciones}
+\input{capitulos/09-instrumento}
+\input{capitulos/10-fourierizer}
+
+\backmatter
+\bibliographystyle{plain}
+\bibliography{referencias}
+\end{document}

@@ -1,0 +1,50 @@
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-nodecimaldot,es-tabla,es-noquoting]{babel}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[a4paper,margin=2.6cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[most]{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{cleveref}
+
+% Design-system colors
+\definecolor{ink}{HTML}{16181A}
+\definecolor{inkmuted}{HTML}{5A6068}
+\definecolor{chassis}{HTML}{E4E7EA}
+\definecolor{layerone}{HTML}{F28C28}
+\definecolor{layeronedeep}{HTML}{B85A00}
+
+% "En el estudio" box: the producer-facing translation of a result
+\newtcolorbox{estudio}{enhanced, breakable, colback=chassis!60, colframe=ink, boxrule=0.8pt,
+  arc=1.5pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  title={\small\sffamily\bfseries EN EL ESTUDIO}, coltitle=ink, colbacktitle=layerone,
+  attach boxed title to top left={xshift=8pt, yshift=-7pt}, boxed title style={boxrule=0.8pt, colframe=ink, arc=1pt}}
+
+% Theorems (Spanish names)
+\theoremstyle{plain}
+\newtheorem{teorema}{Teorema}[chapter]
+\newtheorem{proposicion}[teorema]{Proposición}
+\newtheorem{corolario}[teorema]{Corolario}
+\theoremstyle{definition}
+\newtheorem{definicion}[teorema]{Definición}
+\newtheorem{ejemplo}[teorema]{Ejemplo}
+\theoremstyle{remark}
+\newtheorem*{observacion}{Observación}
+
+% Notation
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\C}{\mathbb{C}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Fs}{F_{\mathrm{s}}}
+\newcommand{\dB}{\,\mathrm{dB}}
+\newcommand{\Hz}{\,\mathrm{Hz}}
+\newcommand{\e}{\mathrm{e}}
+\newcommand{\iu}{\mathrm{i}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\enproceso}[1]{\begin{tcolorbox}[colback=white,colframe=inkmuted,boxrule=0.5pt,arc=1pt]\small\textbf{En preparación.} #1\end{tcolorbox}}

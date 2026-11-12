@@ -94,3 +94,26 @@ jobs:
           python-version: "3.11"
       - run: pip install -e ".[dev]"
       - run: pytest -q
+
+  theory:
+    name: Theory document (PDF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Generate figures and tables
+        run: |
+          pip install -e "python[dev]"
+          python python/examples/theory_figures.py
+      - name: Compile LaTeX
+        uses: xu-cheng/latex-action@v3
+        with:
+          working_directory: docs/theory
+          root_file: main.tex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fourierizer-teoria
+          path: docs/theory/main.pdf
+          if-no-files-found: error

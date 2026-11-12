@@ -14,3 +14,14 @@ node_modules/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+
+# LaTeX build products
+docs/theory/*.aux
+docs/theory/*.log
+docs/theory/*.out
+docs/theory/*.toc
+docs/theory/*.bbl
+docs/theory/*.blg
+docs/theory/*.fls
+docs/theory/*.fdb_latexmk
+docs/theory/main.pdf
