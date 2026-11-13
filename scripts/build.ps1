@@ -20,6 +20,9 @@ $env:Path = "$(Split-Path $vswhere);$env:Path"
 Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
 Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
 
+# Node.js (for the web UI) may have been installed after this shell started: reload PATH.
+$env:Path = "$env:Path;" + [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
+
 $buildDir = Join-Path $repo "build\$($Config.ToLower())"
 # Native tools (git, cmake) write progress to stderr; in Windows PowerShell 5.1 that must not
 # count as a failure. Judge them by their exit code instead.

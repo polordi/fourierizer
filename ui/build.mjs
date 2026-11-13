@@ -7,6 +7,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 const watch = process.argv.includes("--watch");
 const FONTS = '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap">';
 const TITLE = "<title>Fourierizer</title>";
+
+// The plugin must work offline: embed the two typefaces (SIL Open Font License) as data URIs.
+async function embeddedFonts() {
+  const faces = [["Archivo", "archivo", [400, 600, 800]], ["IBM Plex Mono", "ibm-plex-mono", [400, 600]]];
+  let css = "";
+  for (const [family, pkg, weights] of faces)
+    for (const w of weights) {
+      const data = await readFile(`node_modules/@fontsource/${pkg}/files/${pkg}-latin-${w}-normal.woff2`);
+      css += `@font-face{font-family:"${family}";font-style:normal;font-weight:${w};font-display:block;src:url(data:font/woff2;base64,${data.toString("base64")}) format("woff2")}`;
+    }
+  return `<style>${css}</style>`;
+}
 const BODY = '<div id="app" class="fz"></div><div id="toast" role="status" aria-live="polite"></div>';
 
 async function bundle(entry, define = {}) {
@@ -22,7 +34,7 @@ async function once() {
   const js = app.replace(/<\/script/gi, "<\\/script");
   await mkdir("dist", { recursive: true });
   await writeFile("dist/index.html",
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${TITLE}${FONTS}<style>${css}</style></head><body>${BODY}<script>${js}</script></body></html>`);
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${TITLE}${await embeddedFonts()}<style>${css}</style></head><body>${BODY}<script>${js}</script></body></html>`);
   await writeFile("dist/artifact.html", `${TITLE}\n${FONTS}\n<style>${css}</style>\n${BODY}\n<script>${js}</script>\n`);
   console.log(`built dist/index.html and dist/artifact.html (${(js.length / 1024).toFixed(0)} KB js) in ${Date.now() - t0} ms`);
 }

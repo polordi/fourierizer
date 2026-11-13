@@ -22,11 +22,11 @@ from each sound, and synthesize a brand-new sound from those selections — then
 - **Playable result**: polyphonic sampler with *Tape* (resampling) and *Spectral* (duration-preserving) keytracking modes.
 - **Iterations**: feed a result back as a source for the next synthesis.
 
-## Repository layout (planned)
+## Repository layout
 
 ```
-core/      C++ DSP library (no framework dependency)
-plugin/    JUCE plugin: processor, sampler, render worker, state
+core/      C++ synthesis engine (no framework dependency) + golden tests
+plugin/    JUCE plugin: processor, sampler, engine service (renders, state), WebView editor
 ui/        Web UI (TypeScript) used by the plugin and by the browser demo
 python/    Reference implementation and golden test vectors
 docs/      Plan, architecture decisions, learning notes, design, theory

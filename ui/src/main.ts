@@ -1,10 +1,10 @@
-// Fourierizer UI entry point. Builds the window, owns the project state and talks to the engine
-// through `Host` (browser worker now, JUCE bridge in the plugin).
+// Fourierizer UI entry point. Builds the window, owns the project state and talks to its
+// environment through `Host`: BrowserHost in the demo, PluginHost inside the plugin.
 
-import { BrowserHost, type Host } from "./host.ts";
+import { BrowserHost, type Host, type ResultInfo, type SamplerParams, type SourceInfo } from "./host.ts";
+import { PluginHost, insidePlugin } from "./plugin-host.ts";
 import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
-import { Sampler } from "./audio/sampler.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
 import { Fader, Knob, Segmented, Stepper, key } from "./view/controls.ts";
@@ -13,7 +13,7 @@ import { OPS, type Op } from "./dsp/ops.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { LayerJob } from "./protocol.ts";
 import {
-  SR, MAX_SECONDS, activeLayers, adsrMap, cloneShapes, exampleState, featherOf, gridOf, noteName,
+  SR, MAX_SECONDS, activeLayers, adsrMap, cloneShapes, emptyState, exampleState, featherOf, gridOf, noteName,
   type LayerState, type State, type Tool,
 } from "./model.ts";
 
@@ -23,9 +23,8 @@ const KEYMAP: Record<string, number> = {
 };
 
 class App implements LayerHost {
-  st: State = exampleState();
-  host: Host = new BrowserHost();
-  sampler = new Sampler();
+  host: Host = insidePlugin() ? new PluginHost() : new BrowserHost();
+  st: State = this.host.kind === "plugin" ? emptyState() : exampleState();
   views: LayerView[] = [];
   private layersEl!: HTMLElement;
   private pickedShape: { layer: number; shape: number } | null = null;
@@ -36,11 +35,12 @@ class App implements LayerHost {
   private renderTimer = 0;
   private rendering = false;
   private queued = false;
-  private result: { channels: Float32Array[]; duration: number } | null = null;
+  private result: { duration: number } | null = null;
   private keyBase = 48;
   private held = new Map<string, number>();
   private midiInputs = 0;
   private refreshers: { refresh(): void }[] = [];
+  private savedJson = "";
 
   // footer elements
   private statusEl!: HTMLElement;
@@ -56,6 +56,7 @@ class App implements LayerHost {
   private keysEl!: HTMLElement;
   private midiKey!: HTMLButtonElement;
   private resultEmpty!: HTMLElement;
+  private outKeys!: HTMLElement;
 
   // ------------------------------------------------------------------ LayerHost
   state(i: number): LayerState { return this.st.layers[i]; }
@@ -68,7 +69,7 @@ class App implements LayerHost {
     if (prev) this.views[prev.layer].drawShapes();
     if (p && (!prev || prev.layer !== p.layer)) this.views[p.layer].drawShapes();
   }
-  ensureAudio(): void { this.sampler.ensure(); }
+  ensureAudio(): void { this.host.ensureAudio(); }
 
   focus(n: number): void {
     if (n === this.st.focus) return;
@@ -93,60 +94,68 @@ class App implements LayerHost {
     if (what.render) this.scheduleRender();
   }
 
-  pickFile(i: number): void { void i; }
+  pickFile(i: number): boolean {
+    const p = this.host.pickFile(i);
+    if (!p) return false;
+    p.then((info) => { if (info) this.applySource(i, info, false); }).catch((e: Error) => this.toast(e.message));
+    return true;
+  }
   capture(_i: number): void {
-    this.toast("Capturing from the mixer works inside FL Studio with the Fourierizer Capture plugin.");
+    this.toast("Capturing from the mixer arrives with the Fourierizer Capture plugin (milestone H8).");
   }
   toggleMute(i: number): void { const l = this.st.layers[i]; l.mute = !l.mute; this.views[i].refresh(); this.scheduleRender(); }
+  toggleSolo(i: number): void { const l = this.st.layers[i]; l.solo = !l.solo; this.views[i].refresh(); this.scheduleRender(); }
+
   private previewReq = 0;
+  private previewWanted = -1;
+  private previewShown = -1;
   togglePreview(i: number): void {
     this.ensureAudio();
-    if (this.sampler.previewLayer === i || this.previewWanted === i) { this.previewWanted = -1; this.previewReq++; this.sampler.stopPreview(); this.views[i].setPreviewing(false); return; }
+    if (this.previewShown === i || this.previewWanted === i) { this.stopPreview(); return; }
     const l = this.st.layers[i];
     if (!l.loaded) return;
     if (!l.shapes.length) { this.toast(`Nothing is selected on layer ${i + 1} yet`); return; }
-    if (this.previewWanted >= 0) this.views[this.previewWanted].setPreviewing(false);
-    this.sampler.stopPreview();
+    this.stopPreview();
     this.previewWanted = i;
     this.views[i].setPreviewing(true);
     const req = ++this.previewReq;
-    this.host.layer(this.job(l), SR).then((r) => {
+    this.host.preview(i, this.job(l)).then((r) => {
       if (req !== this.previewReq) return;
       this.previewWanted = -1;
       if (!(r.peak > 0)) { this.views[i].setPreviewing(false); this.toast(`The selection on layer ${i + 1} is silent`); return; }
-      this.sampler.playPreview(i, r.channels, SR, r.peak);
-      this.views[i].setPreviewing(true);
+      this.previewShown = i;
+      this.animatePlayhead();
     }).catch((e: Error) => { if (req === this.previewReq) { this.previewWanted = -1; this.views[i].setPreviewing(false); this.toast(e.message); } });
   }
-  private previewWanted = -1;
-
-  toggleSolo(i: number): void { const l = this.st.layers[i]; l.solo = !l.solo; this.views[i].refresh(); this.scheduleRender(); }
+  private stopPreview(): void {
+    this.previewReq++;
+    for (const j of [this.previewWanted, this.previewShown]) if (j >= 0) this.views[j].setPreviewing(false);
+    this.previewWanted = this.previewShown = -1;
+    this.host.stopPreview();
+  }
 
   async load(i: number, file: File): Promise<void> {
     try {
       this.toast(`Loading ${file.name}…`);
-      const data = await file.arrayBuffer();
-      const audio = await new OfflineAudioContext(2, 1, SR).decodeAudioData(data);
-      const n = Math.min(audio.length, MAX_SECONDS * SR), chs = Math.min(2, audio.numberOfChannels);
-      const channels = Array.from({ length: chs }, (_, c) => audio.getChannelData(c).slice(0, n));
-      this.setLayerAudio(i, file.name.replace(/\.[^.]+$/, ""), channels, false);
-      this.toast(audio.duration > MAX_SECONDS ? `Loaded the first ${MAX_SECONDS} s of ${file.name}` : `Loaded ${file.name} into layer ${i + 1}`);
-    } catch {
-      this.toast(`Could not read ${file.name}. Try WAV, AIFF, FLAC, MP3 or OGG.`);
+      const info = await this.host.loadFile(i, file);
+      this.applySource(i, info, false);
+      this.toast(info.trimmed ? `Loaded the first ${MAX_SECONDS} s of ${file.name}` : `Loaded ${file.name} into layer ${i + 1}`);
+    } catch (e) {
+      this.toast((e as Error).message || `Could not read ${file.name}. Try WAV, AIFF, FLAC, MP3 or OGG.`);
     }
   }
 
-  private setLayerAudio(i: number, name: string, channels: Float32Array[], keepShapes: boolean): void {
+  /** A layer got new audio (its source already lives in the host). */
+  private applySource(i: number, info: SourceInfo, keepShapes: boolean, render = true): void {
     const l = this.st.layers[i];
-    l.name = name; l.loaded = true; l.samples = channels[0].length; l.channels = channels.length;
+    l.name = info.name; l.loaded = true; l.samples = info.samples; l.channels = info.channels;
     if (!keepShapes) { l.shapes = []; l.pitch = 0; l.offset = 0; }
     if (this.pickedShape?.layer === i) this.pickedShape = null;
-    if (this.sampler.previewLayer === i) this.sampler.stopPreview();
-    this.host.setSource(i, channels);
+    if (this.previewShown === i || this.previewWanted === i) this.stopPreview();
     this.views[i].clearSpectrogram();
     this.views[i].refresh();
     void this.requestSpectrogram(i);
-    this.scheduleRender();
+    if (render) this.scheduleRender();
   }
 
   private async requestSpectrogram(i: number): Promise<void> {
@@ -192,7 +201,7 @@ class App implements LayerHost {
     if (this.rendering) { this.queued = true; return; }
     const active = activeLayers(this.st).filter((l) => l.levelDb > -Infinity);
     const op = this.st.op, pair = OPS.find((o) => o.id === op)!.pair;
-    if (!active.length) { this.setResult(null); this.status("Load a sound to begin"); return; }
+    if (!active.length) { this.setResult(null); this.status(this.st.layers.some((l) => l.loaded) ? "Every layer is muted" : "Load a sound to begin"); return; }
     if (pair && (!active.includes(this.st.layers[this.st.opA]) || !active.includes(this.st.layers[this.st.opB]))) {
       this.status(`${OPS.find((o) => o.id === op)!.label} needs layers A and B loaded and unmuted`); return;
     }
@@ -205,11 +214,9 @@ class App implements LayerHost {
     try {
       const all = this.st.layers.map((l) => (active.includes(l) ? this.job(l) : null));
       const r = await this.host.render({ sr: SR, op, a: this.st.opA, b: this.st.opB, layers: active.map((l) => this.job(l)), all });
-      const dur = r.channels[0]?.length / SR || 0;
-      this.setResult(r.channels[0]?.length ? { channels: r.channels, duration: dur } : null, r.image);
+      this.showResult(r);
       const used = pair ? [this.st.opA, this.st.opB] : lit;
       this.leds.forEach((e, i) => (e.dataset.on = String(used.includes(i))));
-      this.status(r.peak > 0 ? `Done · ${(r.ms / 1000).toFixed(2)} s · peak −0.3 dBFS` : "Silent · nothing is selected");
     } catch (e) {
       this.status("Render failed");
       this.toast((e as Error).message);
@@ -220,12 +227,17 @@ class App implements LayerHost {
     }
   }
 
-  private setResult(r: { channels: Float32Array[]; duration: number } | null, image?: { data: Uint8Array; cols: number; rows: number } | null): void {
+  private showResult(r: ResultInfo): void {
+    this.setResult(r.duration > 0 && r.peak > 0 ? { duration: r.duration } : null, r.image);
+    this.status(r.peak > 0 ? `Done · ${(r.ms / 1000).toFixed(2)} s · peak −0.3 dBFS` : "Silent · nothing is selected");
+  }
+
+  private setResult(r: { duration: number } | null, image?: { data: Uint8Array; cols: number; rows: number } | null): void {
     this.result = r;
-    this.sampler.setResult(r ? r.channels : [], SR);
     if (r && image) paintSpectrogram(this.resultCanvas, image, 0);
     else this.resultCanvas.getContext("2d")?.clearRect(0, 0, this.resultCanvas.width, this.resultCanvas.height);
     this.resultEmpty.style.display = r ? "none" : "";
+    this.outKeys.toggleAttribute("data-off", !r);
     const opLabel = OPS.find((o) => o.id === this.st.op)!;
     this.resultMeta.textContent = r ? `${opLabel.id === "sum" ? "Σ" : opLabel.label} · ${r.duration.toFixed(2)} s · stereo` : "";
     const dur = r?.duration ?? 4, step = dur > 30 ? 10 : dur > 12 ? 5 : dur > 5 ? 2 : 1;
@@ -242,6 +254,18 @@ class App implements LayerHost {
     el.textContent = t; el.classList.add("show");
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => el.classList.remove("show"), 3200);
+  }
+
+  // ------------------------------------------------------------------ sampler
+  private samplerParams(): SamplerParams { return { ...this.st.adsr, root: this.st.root }; }
+  private pushSampler(): void { this.host.setSampler(this.samplerParams()); }
+
+  private audition(): void {
+    this.ensureAudio();
+    if (!this.result) return;
+    const root = this.st.root;
+    this.host.noteOn(root, 0.9);
+    window.setTimeout(() => this.host.noteOff(root), Math.max(50, this.result.duration * 1000 - adsrMap.r(this.st.adsr.r) * 500));
   }
 
   // ------------------------------------------------------------------ layout
@@ -263,8 +287,12 @@ class App implements LayerHost {
   }
 
   // ------------------------------------------------------------------ build
+  private knobs: { refresh(spring?: boolean): void }[] = [];
+  private rootStep!: Stepper;
+
   build(root: HTMLElement): void {
     const st = this.st;
+    const plugin = this.host.kind === "plugin";
 
     // header
     const viewSeg = new Segmented(null, [
@@ -273,14 +301,14 @@ class App implements LayerHost {
         const sw = h("span", { class: "swatch", "aria-hidden": "true" });
         return { id: String(n), label: String(n), icon: sw as unknown as SVGElement, cls: `row fz-l${n}`, aria: `Focus layer ${n}`, title: `Focus layer ${n} (${n})` };
       }),
-    ], () => String(st.focus), (id) => this.focus(+id), "");
+    ], () => String(this.st.focus), (id) => this.focus(+id), "");
     const toolSeg = new Segmented(null, ([
       ["rect", "Rect", ICONS.rect, "Drag a rectangle to select (Alt subtracts). Click a selection to move, resize, fade or delete it"],
       ["lasso", "Lasso", ICONS.lasso, "Draw a free shape to select (Alt subtracts). Click a selection to move, scale, fade or delete it"],
       ["erase", "Erase", ICONS.erase, "Drag a rectangle to remove from the selection"],
       ["move", "Move", ICONS.move, "Only pick and move selections, never draw. Delete removes the picked one"],
     ] as const).map(([id, label, ic, title]) => ({ id, label, icon: icon(ic), cls: "row", title })),
-    () => st.tool, (id) => { st.tool = id as Tool; this.views.forEach((v) => { v.el.className = v.el.className.replace(/\btool-\w+/g, ""); v.el.classList.add(`tool-${id}`); v.drawShapes(); }); });
+    () => this.st.tool, (id) => { this.st.tool = id as Tool; this.applyTool(); });
     this.refreshers.push(viewSeg, toolSeg);
     const header = h("header", { class: "top" },
       h("div", { class: "brand" }, h("span", { class: "wordmark" }, "Fourierizer"), h("span", { class: "silk" }, "Time–frequency selection synth")),
@@ -301,11 +329,11 @@ class App implements LayerHost {
     this.leds = [1, 2, 3, 4].map((n) => h("span", { class: `led fz-l${n}`, "data-on": "false" }));
     const go = key("Fourierize", ICONS.wave, { class: "go", title: "Render the result now" }, () => { this.ensureAudio(); void this.renderNow(); });
     this.autoKey = key("Auto-render", null, { class: "sm", "aria-pressed": String(st.auto), title: "Re-render automatically after every change" }, () => {
-      st.auto = !st.auto; this.autoKey.setAttribute("aria-pressed", String(st.auto)); if (st.auto) this.scheduleRender(true);
+      this.st.auto = !this.st.auto; this.autoKey.setAttribute("aria-pressed", String(this.st.auto)); if (this.st.auto) this.scheduleRender(true);
     });
     this.slotPick = h("div", { class: "slotpick", hidden: true });
     this.slotPick.append(...[1, 2, 3, 4].map((n) => {
-      const b = key(String(n), null, { class: `sm fz-l${n}`, "aria-label": `Send the result to layer ${n}`, title: `Replace layer ${n} with the result` }, () => this.toSlot(n - 1));
+      const b = key(String(n), null, { class: `sm fz-l${n}`, "aria-label": `Send the result to layer ${n}`, title: `Replace layer ${n} with the result` }, () => void this.toSlot(n - 1));
       b.prepend(h("span", { class: "swatch", "aria-hidden": "true" }));
       return b;
     }));
@@ -317,32 +345,36 @@ class App implements LayerHost {
     const goCol = h("div", { class: "go-col" }, go, h("div", { class: "leds" }, ...this.leds), this.statusEl,
       this.autoKey, slotKey, this.slotPick);
 
-    const opSeg = new Segmented(null, OPS.map((o) => ({ id: o.id, label: o.label, title: o.hint })), () => st.op, (id) => {
-      st.op = id as Op; this.syncOp(); this.scheduleRender(true);
+    const opSeg = new Segmented(null, OPS.map((o) => ({ id: o.id, label: o.label, title: o.hint })), () => this.st.op, (id) => {
+      this.st.op = id as Op; this.syncOp(); this.scheduleRender(true);
     });
     const pairSeg = (which: "opA" | "opB") => new Segmented(null, [0, 1, 2, 3].map((i) => ({ id: String(i), label: String(i + 1), cls: `fz-l${i + 1}`, aria: `Layer ${i + 1}` })),
-      () => String(st[which]), (id) => { st[which] = +id; this.scheduleRender(true); }, "pairpick");
+      () => String(this.st[which]), (id) => { this.st[which] = +id; this.scheduleRender(true); }, "pairpick");
     const segA = pairSeg("opA"), segB = pairSeg("opB");
     this.opHint = h("span", { class: "ro-sm", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" });
     this.pairRow = h("div", { class: "pairpick" }, h("span", { class: "silk sm" }, "A"), segA.el, h("span", { class: "silk sm" }, "B"), segB.el);
     this.resultMeta = h("span", { class: "ro-sm", style: "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto" });
+
+    // Export and drag-out (the plugin writes the WAV; dragging drops it into FL's playlist)
+    const exportKey = key("WAV", ICONS.load, { class: "sm", title: "Export the result as a 24-bit WAV file" }, () => {
+      if (!this.result || !this.host.exportResult) return;
+      this.host.exportResult().then((path) => { if (path) this.toast(`Saved ${path}`); }).catch((e: Error) => this.toast(e.message));
+    });
+    const dragKey = key("Drag", ICONS.move, { class: "sm drag", title: "Drag the result into the playlist or a sampler" });
+    dragKey.addEventListener("pointerdown", (e) => { if (e.button === 0 && this.result && this.host.dragResult) this.host.dragResult(); });
+    this.outKeys = h("div", { class: "outkeys" }, exportKey, dragKey);
+    this.outKeys.hidden = !plugin;
+
     this.resultCanvas = h("canvas", { class: "spec" });
     this.playheadEl = h("span", { class: "playhead" });
     this.resultEmpty = h("div", { class: "empty-hint silk" }, "Nothing selected yet");
     const resultDisplay = h("div", { class: "display", title: "Click to play the result at the root note", role: "button", tabindex: 0, "aria-label": "Result spectrogram. Press to play" },
       this.resultCanvas, this.playheadEl, this.resultEmpty);
-    const audition = () => {
-      this.ensureAudio();
-      if (!this.result) return;
-      this.sampler.noteOn(st.root, 0.9);
-      const root = st.root;
-      window.setTimeout(() => this.sampler.noteOff(root), Math.max(50, this.result.duration * 1000 - this.sampler.env.r * 500));
-    };
-    resultDisplay.addEventListener("click", audition);
-    resultDisplay.addEventListener("keydown", (e) => { if (e.key === "Enter") audition(); });
+    resultDisplay.addEventListener("click", () => this.audition());
+    resultDisplay.addEventListener("keydown", (e) => { if (e.key === "Enter") this.audition(); });
     this.resultAxis = h("div", { class: "rx", "aria-hidden": "true" });
     const resultMain = h("div", { class: "main" },
-      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta),
+      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys),
       h("div", { class: "rhead" }, opSeg.el, this.opHint),
       resultDisplay, this.resultAxis);
     const resultMod = h("section", { class: "module result", "aria-label": "Result" }, ...screws(), goCol, resultMain);
@@ -352,74 +384,99 @@ class App implements LayerHost {
     const keytrack = new Segmented("Keytrack", [
       { id: "tape", label: "Tape", title: HELP.tape },
       { id: "spectral", label: "Spectral", disabled: true, title: HELP.spectral },
-    ], () => st.keytrack, (id) => { st.keytrack = id as "tape"; });
+    ], () => this.st.keytrack, (id) => { this.st.keytrack = id as "tape"; });
     keytrack.el.dataset.tip = HELP.keytrack;
-    const rootStep = new Stepper({
-      label: "Root", display: () => noteName(st.root), derived: () => `MIDI ${st.root} · ${(440 * 2 ** ((st.root - 69) / 12)).toFixed(1)} Hz`,
-      canStep: (d) => d > 0 ? st.root < 127 : st.root > 0,
-      step: (d, fine) => { st.root = Math.max(0, Math.min(127, st.root + d * (fine ? 12 : 1))); this.sampler.root = st.root; },
+    this.rootStep = new Stepper({
+      label: "Root", display: () => noteName(this.st.root), derived: () => `MIDI ${this.st.root} · ${(440 * 2 ** ((this.st.root - 69) / 12)).toFixed(1)} Hz`,
+      canStep: (d) => d > 0 ? this.st.root < 127 : this.st.root > 0,
+      step: (d, fine) => { this.st.root = Math.max(0, Math.min(127, this.st.root + d * (fine ? 12 : 1))); this.pushSampler(); },
       dragPx: 10, tip: HELP.root,
     });
     this.keysEl = h("span", { class: "ro-sm keys" });
     this.midiKey = key("MIDI", ICONS.midi, { class: "sm", title: "Play from a MIDI keyboard (if the browser allows it)" }, () => void this.enableMidi());
+    this.midiKey.hidden = plugin;  // in the plugin, MIDI comes from the host
     const fmtMs = (s: number) => s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(2)} s`;
-    const env = () => { const a = st.adsr; this.sampler.env = { a: adsrMap.a(a.a), d: adsrMap.d(a.d), s: adsrMap.s(a.s), r: adsrMap.r(a.r) }; };
-    env();
     const knob = (k: "a" | "d" | "s" | "r", label: string, fmt: (v: number) => string, reset: number) =>
-      new Knob({ label, aria: { a: "Attack", d: "Decay", s: "Sustain", r: "Release" }[k], tip: { a: HELP.attack, d: HELP.decay, s: HELP.sustain, r: HELP.release }[k], get: () => st.adsr[k], set: (v) => { st.adsr[k] = v; env(); }, format: fmt, reset });
+      new Knob({ label, aria: { a: "Attack", d: "Decay", s: "Sustain", r: "Release" }[k], tip: { a: HELP.attack, d: HELP.decay, s: HELP.sustain, r: HELP.release }[k], get: () => this.st.adsr[k], set: (v) => { this.st.adsr[k] = v; this.pushSampler(); }, format: fmt, reset });
     const kA = knob("a", "Atk", (v) => fmtMs(adsrMap.a(v)), 0.18), kD = knob("d", "Dec", (v) => fmtMs(adsrMap.d(v)), 0.33);
     const kS = knob("s", "Sus", (v) => v < 0.005 ? "−∞ dB" : `${(20 * Math.log10(v)).toFixed(1).replace("-", "−")} dB`, 0.7);
     const kR = knob("r", "Rel", (v) => fmtMs(adsrMap.r(v)), 0.4);
+    this.knobs = [kA, kD, kS, kR];
     const samplerMod = h("section", { class: "module sampler fz-l0", "aria-label": "Sampler" }, ...screws(),
-      h("div", { class: "row" }, keytrack.el, rootStep.el, h("span", { class: "grow" }),
+      h("div", { class: "row" }, keytrack.el, this.rootStep.el, h("span", { class: "grow" }),
         h("div", { style: "display:grid;gap:6px;justify-items:end" }, this.midiKey, this.keysEl)),
       h("div", { class: "knobs" }, kA.el, kD.el, kS.el, kR.el));
+    this.refreshers.push(keytrack);
 
     // mix
-    const faders = [0, 1, 2, 3].map((i) => new Fader(`L${i + 1}`, `fz-l${i + 1}`, () => st.layers[i].levelDb, (db) => { st.layers[i].levelDb = db; this.scheduleRender(); }, HELP.level));
+    const faders = [0, 1, 2, 3].map((i) => new Fader(`L${i + 1}`, `fz-l${i + 1}`, () => this.st.layers[i].levelDb, (db) => { this.st.layers[i].levelDb = db; this.scheduleRender(); }, HELP.level));
+    this.refreshers.push(...faders);
     const mixMod = h("section", { class: "module mix", "aria-label": "Layer levels" }, ...screws(), ...faders.map((f) => f.el));
 
     root.append(header, this.layersEl, h("footer", { class: "bottom" }, resultMod, samplerMod, mixMod));
     this.syncOp();
     this.updateKeys();
     this.setResult(null);
+    this.pushSampler();
 
     new ResizeObserver(() => this.layout(false)).observe(this.layersEl);
     this.layout(false);
-    this.sampler.onActivity = () => this.animatePlayhead();
-    this.sampler.onPreviewEnd = (i) => { if (this.previewWanted !== i) this.views[i].setPreviewing(false); };
+    this.host.onPlay = () => this.animatePlayhead();
+    this.host.onParams = (p) => this.applySamplerParams(p);
+    this.host.onReload = () => void this.restore();
     this.wireKeyboard();
+    if (plugin) window.setInterval(() => this.save(), 700);
+  }
+
+  private applyTool(): void {
+    this.views.forEach((v) => { v.el.className = v.el.className.replace(/\btool-\w+/g, ""); v.el.classList.add(`tool-${this.st.tool}`); v.drawShapes(); });
+  }
+
+  private applySamplerParams(p: SamplerParams): void {
+    this.st.adsr = { a: p.a, d: p.d, s: p.s, r: p.r };
+    this.st.root = p.root;
+    this.knobs.forEach((k) => k.refresh());
+    this.rootStep.refresh();
   }
 
   private syncOp(): void {
-    const o = OPS.find((x) => x.id === this.st.op)!;
+    const o = OPS.find((x) => x.id === this.st.op) ?? OPS[0];
+    this.st.op = o.id;
     this.pairRow.hidden = !o.pair;
     this.opHint.textContent = o.hint;
   }
 
-  private toSlot(i: number): void {
+  private async toSlot(i: number): Promise<void> {
     if (!this.result) return;
-    const copies = this.result.channels.map((c) => c.slice());
     this.slotPick.hidden = true;
-    this.setLayerAudio(i, `Result → L${i + 1}`, copies, false);
-    this.toast(`The result is now layer ${i + 1}. Select parts of it to iterate.`);
+    try {
+      const info = await this.host.resultToLayer(i, `Result → L${i + 1}`);
+      this.applySource(i, info, false);
+      this.toast(`The result is now layer ${i + 1}. Select parts of it to iterate.`);
+    } catch (e) { this.toast((e as Error).message); }
   }
 
   private raf = 0;
   private animatePlayhead(): void {
     if (this.raf) return;
     const tick = () => {
-      const p = this.sampler.playhead(), lp = this.sampler.previewLayer;
-      if (lp >= 0) this.views[lp].setPlayhead(this.sampler.previewPos());
-      if (p < 0) { this.playheadEl.style.display = "none"; this.raf = 0; if (!this.sampler.active && lp < 0) return; }
-      else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${p * 100}%`; }
+      const s = this.host.playState();
+      if (this.previewShown >= 0 && s.preview !== this.previewShown && this.previewWanted < 0) {
+        this.views[this.previewShown].setPreviewing(false);   // the preview ended on its own
+        this.previewShown = -1;
+      }
+      if (s.preview >= 0) this.views[s.preview].setPlayhead(s.previewPos);
+      if (s.result < 0) this.playheadEl.style.display = "none";
+      else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${s.result * 100}%`; }
+      if (s.result < 0 && s.voices === 0 && s.preview < 0 && this.previewWanted < 0 && this.previewShown < 0) { this.raf = 0; return; }
       this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);
   }
 
   private updateKeys(): void {
-    this.keysEl.textContent = `Keys A–L · ${noteName(this.keyBase)}\nZ X octave${this.midiInputs ? ` · MIDI ×${this.midiInputs}` : ""}`;
+    const midi = this.host.kind !== "plugin" && this.midiInputs ? ` · MIDI ×${this.midiInputs}` : "";
+    this.keysEl.textContent = `Keys A–L · ${noteName(this.keyBase)}\nZ X octave${midi}`;
   }
 
   private async enableMidi(): Promise<void> {
@@ -445,8 +502,8 @@ class App implements LayerHost {
   private onMidi(d: Uint8Array | null): void {
     if (!d) return;
     const type = d[0] & 0xf0;
-    if (type === 0x90 && d[2] > 0) this.sampler.noteOn(d[1], d[2] / 127);
-    else if (type === 0x80 || (type === 0x90 && d[2] === 0)) this.sampler.noteOff(d[1]);
+    if (type === 0x90 && d[2] > 0) this.host.noteOn(d[1], d[2] / 127);
+    else if (type === 0x80 || (type === 0x90 && d[2] === 0)) this.host.noteOff(d[1]);
   }
 
   private wireKeyboard(): void {
@@ -470,26 +527,73 @@ class App implements LayerHost {
       if (/^Digit[0-4]$/.test(e.code) && !e.shiftKey) { this.focus(+e.code.slice(5)); return; }
       if (e.repeat) { if (e.code in KEYMAP || e.code === "Space") e.preventDefault(); return; }
       if (e.code === "KeyZ" || e.code === "KeyX") { this.keyBase = Math.max(12, Math.min(96, this.keyBase + (e.code === "KeyX" ? 12 : -12))); this.updateKeys(); return; }
-      if (e.code === "Space" && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); this.ensureAudio(); this.sampler.noteOn(this.st.root); this.held.set("Space", this.st.root); return; }
+      if (e.code === "Space" && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); this.ensureAudio(); this.host.noteOn(this.st.root, 0.9); this.held.set("Space", this.st.root); return; }
       const off = KEYMAP[e.code];
       if (off === undefined) return;
       if (e.target instanceof HTMLElement && e.target.getAttribute("role") === "slider" && /^Arrow/.test(e.key)) return;
+      e.preventDefault();
       this.ensureAudio();
       const note = this.keyBase + off;
       this.held.set(e.code, note);
-      this.sampler.noteOn(note, 0.85);
+      this.host.noteOn(note, 0.85);
     });
     window.addEventListener("keyup", (e) => {
       const n = this.held.get(e.code);
-      if (n !== undefined) { this.held.delete(e.code); this.sampler.noteOff(n); }
+      if (n !== undefined) { this.held.delete(e.code); this.host.noteOff(n); }
     });
-    window.addEventListener("blur", () => { this.held.clear(); this.sampler.allOff(); });
+    window.addEventListener("blur", () => { if (this.held.size) { this.held.clear(); this.host.allOff(); } });
+  }
+
+  // ------------------------------------------------------------------ project (plugin)
+  private serialized(): string { return JSON.stringify({ version: 1, state: this.st }); }
+
+  private save(): void {
+    const json = this.serialized();
+    if (json === this.savedJson) return;
+    this.savedJson = json;
+    this.host.saveProject(json);
+  }
+
+  /** Load the plugin's saved project into the UI. */
+  private async restore(): Promise<void> {
+    const r = await this.host.start();
+    if (!r) return;
+    let next = emptyState();
+    if (r.project) {
+      try {
+        const saved = JSON.parse(r.project).state as State;
+        next = { ...next, ...saved, layers: next.layers.map((l, i) => ({ ...l, ...saved.layers?.[i], index: i })) };
+        next.layers.forEach((l) => { if (l.levelDb === null) l.levelDb = -Infinity; });
+      } catch { /* a damaged project: start empty */ }
+    }
+    next.layers.forEach((l, i) => {
+      const info = r.layers[i];
+      l.loaded = !!info;
+      if (info) { l.name = info.name; l.samples = info.samples; l.channels = info.channels; }
+    });
+    if (r.params) { next.adsr = { a: r.params.a, d: r.params.d, s: r.params.s, r: r.params.r }; next.root = r.params.root; }
+    this.st = next;
+    this.savedJson = this.serialized();
+    this.pickedShape = null;
+    this.undoStack = []; this.redoStack = [];
+    this.autoKey.setAttribute("aria-pressed", String(this.st.auto));
+    this.syncOp();
+    this.applyTool();
+    this.refreshers.forEach((x) => x.refresh());
+    this.knobs.forEach((k) => k.refresh());
+    this.rootStep.refresh();
+    this.layout(false);
+    this.views.forEach((v, i) => { v.clearSpectrogram(); v.refresh(); if (this.st.layers[i].loaded) void this.requestSpectrogram(i); });
+    if (r.result && r.result.duration > 0) this.showResult(r.result);
+    else if (this.st.layers.some((l) => l.loaded)) await this.renderNow();
+    else { this.setResult(null); this.status("Drop sounds on the layers to begin"); }
   }
 
   async boot(): Promise<void> {
     try {
+      if (this.host.kind === "plugin") { await this.restore(); return; }
       const sounds = await this.host.examples(SR);
-      sounds.forEach((x, i) => this.setLayerAudio(i, EXAMPLE_NAMES[i], [x], true));
+      sounds.forEach((x, i) => this.applySource(i, this.host.setSourceAudio(i, EXAMPLE_NAMES[i], [x]), true, false));
       await this.renderNow();
     } catch (e) {
       this.status("Engine failed to start");
@@ -500,7 +604,9 @@ class App implements LayerHost {
 
 /** Below the design size, scale the whole instrument (like resizing the plugin window). */
 function fit(app: HTMLElement): void {
-  const minW = 1180, minH = 760, z = Math.min(1, window.innerWidth / minW);
+  // The plugin scales the whole approved 1440×900 layout, like hardware; the page reflows from 1180.
+  const plugin = insidePlugin(), minW = plugin ? 1440 : 1180, minH = plugin ? 900 : 760;
+  const z = Math.min(1, window.innerWidth / minW, plugin ? window.innerHeight / minH : 1);
   app.style.zoom = z < 1 ? String(z) : "";
   app.style.height = z < 1 ? `${Math.max(minH, window.innerHeight / z)}px` : "";
 }

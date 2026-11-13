@@ -162,6 +162,7 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .edit-only { gap: 8px; }
 .mode-rail .full, .mode-rail .screw, .lm:not(.mode-editor) .edit-only { display: none; }
 .cursor-ro:empty { display: none; }
+.mode-rail .empty-hint[data-kind="draw"] { display: none !important; }
 .lm:not(.mode-editor) .xax, .lm:not(.mode-editor) .params, .lm:not(.mode-editor) .cursor-ro, .mode-rail .hd, .mode-rail .shapebar { display: none; }
 .lm:not(.mode-grid) .chips { display: none; }
 .mode-editor .params, .mode-grid .chips, .mode-editor .xax { animation: fz-in 320ms ease-out 300ms both; }
@@ -212,3 +213,9 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 @media (prefers-reduced-motion: reduce) {
   .fz *, .fz *::before, .fz *::after { transition: none !important; animation: none !important; }
 }
+
+/* result export (plugin): WAV file and drag-out into the host */
+.outkeys { display: flex; gap: 6px; flex: none; }
+.outkeys[data-off] .key { opacity: .4; pointer-events: none; }
+.outkeys .key.drag { cursor: grab; }
+.result .rhead > .seg { flex: none; }   /* the operation picker never shrinks; its hint does */

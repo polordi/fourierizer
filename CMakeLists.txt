@@ -37,4 +37,5 @@ endif()
 # ---- Targets -------------------------------------------------------------------------------
 enable_testing()
 add_subdirectory(core)          # fourierizer-core: the engine (no JUCE) + golden tests
+add_subdirectory(plugin)        # Fourierizer: the instrument (VST3 + Standalone)
 add_subdirectory(spikes/h0-hello)

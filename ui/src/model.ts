@@ -90,6 +90,15 @@ function layer(index: number, name: string, shapes: Shape[], extra: Partial<Laye
   };
 }
 
+/** A new, empty project (the plugin starts here). */
+export function emptyState(): State {
+  return {
+    layers: [0, 1, 2, 3].map((i) => layer(i, "", [])),
+    focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", root: 48,
+    adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true,
+  };
+}
+
 /** The example project: the same selections as the layout mockups. */
 export function exampleState(): State {
   return {

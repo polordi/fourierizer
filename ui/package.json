@@ -11,6 +11,8 @@
     "test": "node --test \"test/**/*.test.ts\""
   },
   "devDependencies": {
+    "@fontsource/archivo": "5.2.8",
+    "@fontsource/ibm-plex-mono": "5.2.7",
     "esbuild": "0.25.10",
     "typescript": "5.9.3"
   }

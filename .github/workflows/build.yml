@@ -1,4 +1,4 @@
-# Continuous integration: build every plugin on Windows and macOS, then validate it with
+# Continuous integration: build every plugin (Fourierizer and the H0 spike) on Windows and macOS, then validate it with
 # pluginval. Runs on every push and pull request; built plugins are attached as artifacts.
 name: build
 
@@ -48,6 +48,17 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja
 
+      - name: Node (the plugin embeds the web UI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: UI dependencies
+        working-directory: ui
+        run: npm ci
+
       - name: Configure
         shell: bash
         run: cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -71,7 +82,7 @@ jobs:
         run: |
           shopt -s nullglob
           status=0
-          for p in build/release/spikes/*/*_artefacts/Release/VST3/*.vst3; do
+          for p in build/release/plugin/*_artefacts/Release/VST3/*.vst3 build/release/spikes/*/*_artefacts/Release/VST3/*.vst3; do
             echo "::group::pluginval $p"
             "./pluginval/${{ matrix.pluginval_bin }}" --strictness-level 8 --skip-gui-tests --validate-in-process --validate "$p" || status=1
             echo "::endgroup::"
@@ -82,7 +93,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: plugins-${{ runner.os }}
-          path: build/release/spikes/*/*_artefacts/Release/VST3/*.vst3
+          path: |
+            build/release/plugin/*_artefacts/Release/VST3/*.vst3
+            build/release/spikes/*/*_artefacts/Release/VST3/*.vst3
           if-no-files-found: error
 
   core-linux:

@@ -20,7 +20,8 @@ export interface LayerHost {
   editShapes(i: number, fn: (shapes: Shape[]) => void, opts?: { undo?: boolean; render?: boolean }): void;
   paramsChanged(i: number, what: { spectrogram?: boolean; render?: boolean }): void;
   load(i: number, file: File): void;
-  pickFile(i: number): void;
+  /** Opens the host's file dialog; false means the view should use its own file input. */
+  pickFile(i: number): boolean;
   capture(i: number): void;
   toggleMute(i: number): void;
   toggleSolo(i: number): void;
@@ -136,7 +137,7 @@ export class LayerView {
         key("Clear", ICONS.clear, { class: "sm", title: "Remove every selection on this layer" }, () => host.editShapes(i, (sh) => { sh.length = 0; }))),
       h("span", { class: "full actions" },
         this.led,
-        key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound (or drop a file here)" }, () => { host.ensureAudio(); this.fileInput.click(); }),
+        key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound (or drop a file here)" }, () => { host.ensureAudio(); if (!host.pickFile(i)) this.fileInput.click(); }),
         key(null, ICONS.rec, { class: "sm", "aria-label": "Capture from the mixer", title: "Capture from the mixer" }, () => host.capture(i))),
       this.playB, this.muteB, this.soloB, this.focusB, this.fileInput);
 
@@ -240,6 +241,7 @@ export class LayerView {
     this.playB.disabled = !l.loaded;
     this.hint.textContent = l.loaded ? (l.shapes.length ? "" : "Draw on the spectrogram to select") : "Drop a sound here or press Load";
     this.hint.style.display = this.hint.textContent ? "" : "none";
+    this.hint.dataset.kind = l.loaded ? "draw" : "drop";
     this.refreshParams();
     this.drawAxis();
     this.drawShapes();
@@ -517,7 +519,7 @@ export class LayerView {
       if (e.button !== 0) return;
       this.host.ensureAudio();
       if (this.mode === "rail") { this.host.focus(n); return; }
-      if (!this.host.state(this.i).loaded) { this.fileInput.click(); return; }
+      if (!this.host.state(this.i).loaded) { if (!this.host.pickFile(this.i)) this.fileInput.click(); return; }
       this.svg.setPointerCapture(e.pointerId);
       const tool = this.host.tool(), p = this.rel(e), pk = this.pickedHere();
       start = p; last = p; dragged = false; snapped = false;
