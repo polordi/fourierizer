@@ -76,34 +76,55 @@ export class Sampler {
     try { v.src.stop(now + this.env.r + 0.02); } catch { /* already stopped */ }
   }
 
-  // ---- layer preview: one-shot playback of a single layer's selection, outside the keyboard voices
-  private preview: { src: AudioBufferSourceNode; gain: GainNode; start: number; dur: number; layer: number } | null = null;
+  // ---- layer preview: one-shot playback of a layer, outside the keyboard voices. The selection
+  // and the original sound play in sync; `previewOriginal` crossfades between them (A/B).
+  private preview: { srcs: AudioBufferSourceNode[]; sel: GainNode; orig: GainNode | null; start: number; dur: number; layer: number } | null = null;
+  private original = false;
   onPreviewEnd: ((layer: number) => void) | null = null;
 
-  /** Play `channels` once (peaks above −0.2 dBFS are scaled down, never up). */
-  playPreview(layer: number, channels: Float32Array[], sr: number, peak: number): void {
+  /** Play the selection (and the original, muted unless A/B is on) once, at one shared gain. */
+  playPreview(layer: number, sel: Float32Array[], original: Float32Array[] | null, sr: number, gainLin: number, startOriginal: boolean): void {
     const ctx = this.ensure();
     this.stopPreview();
-    if (!this.master || !channels.length || !channels[0].length) return;
-    const b = ctx.createBuffer(channels.length, channels[0].length, sr);
-    channels.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
-    const src = ctx.createBufferSource(), gain = ctx.createGain(), now = ctx.currentTime;
-    src.buffer = b;
-    gain.gain.value = peak > 0.977 ? 0.977 / peak : 1;
-    src.connect(gain).connect(this.master);
-    src.start(now);
-    this.preview = { src, gain, start: now, dur: b.duration, layer };
-    src.onended = () => { if (this.preview?.src === src) { this.preview = null; this.onPreviewEnd?.(layer); } };
+    if (!this.master || !sel.length || !sel[0].length) return;
+    const now = ctx.currentTime + 0.01;
+    const make = (chs: Float32Array[], on: boolean) => {
+      const b = ctx.createBuffer(chs.length, chs[0].length, sr);
+      chs.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+      const src = ctx.createBufferSource(), g = ctx.createGain();
+      src.buffer = b;
+      g.gain.value = on ? gainLin : 0;
+      src.connect(g).connect(this.master!);
+      src.start(now);
+      return { src, g, dur: b.duration };
+    };
+    this.original = startOriginal && !!original;
+    const a = make(sel, !this.original), o = original ? make(original, this.original) : null;
+    this.preview = { srcs: o ? [a.src, o.src] : [a.src], sel: a.g, orig: o?.g ?? null, start: now, dur: a.dur, layer };
+    this.previewGain = gainLin;
+    a.src.onended = () => { if (this.preview?.srcs[0] === a.src) { this.preview = null; this.onPreviewEnd?.(layer); } };
     this.onActivity?.();
+  }
+  private previewGain = 1;
+
+  /** A/B: hear the original sound (true) or the selection (false); switches while playing. */
+  setPreviewOriginal(on: boolean): void {
+    this.original = on;
+    const p = this.preview;
+    if (!p || !p.orig || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const [g, v] of [[p.sel, on ? 0 : this.previewGain], [p.orig, on ? this.previewGain : 0]] as const) {
+      g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(g.gain.value, now); g.gain.linearRampToValueAtTime(v, now + 0.012);
+    }
   }
 
   stopPreview(): void {
     const p = this.preview;
     if (!p || !this.ctx) return;
     this.preview = null;
-    const now = this.ctx.currentTime, g = p.gain.gain;
-    g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + 0.015);
-    try { p.src.stop(now + 0.02); } catch { /* already stopped */ }
+    const now = this.ctx.currentTime;
+    for (const g of [p.sel, p.orig]) if (g) { g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(g.gain.value, now); g.gain.linearRampToValueAtTime(0, now + 0.015); }
+    for (const src of p.srcs) try { src.stop(now + 0.02); } catch { /* already stopped */ }
     this.onPreviewEnd?.(p.layer);
   }
 

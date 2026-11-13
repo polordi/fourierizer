@@ -15,10 +15,10 @@ Signal midOf(const Channels& x) {
     return m;
 }
 
-SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows) {
+SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows, Axis axis) {
     const long long n = static_cast<long long>(x.size());
     const int M = frameCount(n, g), cols = std::max(1, std::min(M, maxCols));
-    const double fmax = std::min(kSpecFMax, sr / 2);
+    const double fmin = axis.fmin, fmax = std::min(axis.fmax, sr / 2);
     const auto w = makeWindow(g.window, g.L);
     RealFFT fft(g.N);
     const int B = fft.bins();
@@ -26,7 +26,8 @@ SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int
     std::vector<int> bin0(rows);
     for (int r = 0; r < rows; ++r) {
         const double y = (r + 0.5) / rows;
-        const double b = kSpecFMin * std::pow(fmax / kSpecFMin, 1 - y) * g.N / sr;
+        const double f = axis.log ? fmin * std::pow(fmax / fmin, 1 - y) : fmin + (fmax - fmin) * (1 - y);
+        const double b = std::max(0.0, f) * g.N / sr;
         bin0[r] = std::min(B - 2, static_cast<int>(std::floor(b)));
         frac[r] = std::min(1.0, b - bin0[r]);
     }
@@ -47,14 +48,13 @@ SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int
             if (v > a) a = v;
         }
     }
-    SpectrogramImage img{std::vector<uint8_t>(acc.size(), 0), cols, rows};
+    SpectrogramImage img{std::vector<uint8_t>(acc.size(), 255), cols, rows};
     const double peak = acc.empty() ? 0 : *std::max_element(acc.begin(), acc.end());
     if (peak > 0) {
         const double ref = 20 * std::log10(peak);
         for (size_t i = 0; i < acc.size(); ++i) {
-            const double db = 20 * std::log10(acc[i] + 1e-12) - ref;
-            const double v = std::pow(std::clamp((db + kSpecRangeDb) / kSpecRangeDb, 0.0, 1.0), kSpecGamma);
-            img.data[i] = static_cast<uint8_t>(std::lround(v * 255));
+            const double db = 20 * std::log10(acc[i] + 1e-300) - ref;
+            img.data[i] = static_cast<uint8_t>(std::clamp<long>(std::lround(-db * 2), 0, 255));
         }
     }
     return img;

@@ -113,7 +113,7 @@ test("spectrogram puts a 1 kHz tone on the right row", () => {
   const sr = 48000, x = Float64Array.from({ length: sr }, (_, i) => Math.sin(2 * Math.PI * 1000 * i / sr));
   const img = spectrogramImage(x, sr, { window: "hann", L: 4096, N: 4096, H: 1024 }, 50, 360);
   let bestRow = 0, best = -1;
-  for (let r = 0; r < img.rows; r++) if (img.data[r * img.cols + 25] > best) { best = img.data[r * img.cols + 25]; bestRow = r; }
+  for (let r = 0; r < img.rows; r++) if (best < 0 || img.data[r * img.cols + 25] < best) { best = img.data[r * img.cols + 25]; bestRow = r; }  // 0 = loudest
   const y = (bestRow + 0.5) / img.rows, f = 30 * (20000 / 30) ** (1 - y);
   assert.ok(Math.abs(Math.log2(f / 1000)) < 0.03, `peak at ${f} Hz`);
 });

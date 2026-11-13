@@ -2,9 +2,9 @@
 // only its box and mode class change, so CSS can animate the morph between them.
 
 import { h, icon, s, ICONS, screws } from "./dom.ts";
-import { Knob, MiniKnob, Segmented, Stepper, key } from "./controls.ts";
+import { Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./controls.ts";
 import { HELP, HOW, tip } from "./help.ts";
-import { freqToY, yToFreq, F_MIN, F_MAX } from "../dsp/spectrogram.ts";
+import { freqToY, yToFreq, getAxis, level, type Look } from "../dsp/spectrogram.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
 import { F_FLOOR, envelope, rowIntervals, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
 import { SR, WINDOW_LABELS, fadeLabel, fadeToKnob, featherLabel, knobToFade, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
@@ -26,15 +26,29 @@ export interface LayerHost {
   toggleMute(i: number): void;
   toggleSolo(i: number): void;
   togglePreview(i: number): void;
+  /** A/B: preview the original sound instead of the selection. */
+  isOriginal(i: number): boolean;
+  setOriginal(i: number, on: boolean): void;
+  removeSound(i: number): void;
+  look(): Look;
   picked(): { layer: number; shape: number } | null;
   setPicked(p: { layer: number; shape: number } | null): void;
   ensureAudio(): void;
 }
 
-const TICKS: [string, number, boolean][] = [
-  ["10k", 10000, true], ["5k", 5000, false], ["2k", 2000, false], ["1k", 1000, true],
-  ["500", 500, false], ["200", 200, false], ["100", 100, true], ["50", 50, false],
-];
+/** Frequency ticks for the current axis: decades on a log axis, round steps on a linear one. */
+function ticks(): [string, number, boolean][] {
+  const a = getAxis(), lbl = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(f));
+  if (a.scale === "lin") {
+    const span = a.fmax - a.fmin, step = [100, 200, 500, 1000, 2000, 2500, 5000].find((s) => span / s <= 6) ?? 5000;
+    const out: [string, number, boolean][] = [];
+    for (let f = Math.ceil(a.fmin / step) * step; f <= a.fmax; f += step) out.push([lbl(f), f, true]);
+    return out;
+  }
+  return [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20]
+    .filter((f) => f > a.fmin * 1.05 && f < a.fmax * 0.97)
+    .map((f) => [lbl(f), f, f === 100 || f === 1000 || f === 10000] as [string, number, boolean]);
+}
 
 function windowIcon(name: WindowName): SVGSVGElement {
   const w = makeWindow(name, 40);
@@ -60,12 +74,15 @@ function lut(layer: number): Uint8ClampedArray {
   return t;
 }
 
-/** Paint a spectrogram image (0–255 values) into a canvas with a layer colormap. */
-export function paintSpectrogram(canvas: HTMLCanvasElement, img: { data: Uint8Array; cols: number; rows: number }, layer: number): void {
+/** Paint a spectrogram image (half-dB steps below its peak) with a layer colormap and a look
+ *  (dB range and gain), so range and gain changes repaint instantly. */
+export function paintSpectrogram(canvas: HTMLCanvasElement, img: { data: Uint8Array; cols: number; rows: number }, layer: number, look: Look): void {
   canvas.width = img.cols; canvas.height = img.rows;
   const ctx = canvas.getContext("2d")!, out = ctx.createImageData(img.cols, img.rows), t = lut(layer);
+  const map = new Uint16Array(256);
+  for (let v = 0; v < 256; v++) map[v] = Math.round(level(v, look) * 255) * 3;
   for (let i = 0; i < img.data.length; i++) {
-    const v = img.data[i] * 3;
+    const v = map[img.data[i]];
     out.data[i * 4] = t[v]; out.data[i * 4 + 1] = t[v + 1]; out.data[i * 4 + 2] = t[v + 2]; out.data[i * 4 + 3] = 255;
   }
   ctx.putImageData(out, 0, 0);
@@ -102,8 +119,12 @@ export class LayerView {
   private muteB: HTMLButtonElement;
   private soloB: HTMLButtonElement;
   private playB: HTMLButtonElement;
+  private origB: HTMLButtonElement;
+  private yax: HTMLElement;
+  private img: { data: Uint8Array; cols: number; rows: number } | null = null;
   private playhead: HTMLElement;
   private focusB: HTMLButtonElement;
+  private removeB!: HTMLButtonElement;
   private canvas: HTMLCanvasElement;
   private svg: SVGSVGElement;
   private handles: HTMLElement;
@@ -125,6 +146,7 @@ export class LayerView {
     this.led = h("span", { class: "led full", title: "Loaded" });
     this.muteB = key("M", null, { class: "sm", "aria-label": `Mute layer ${n}`, "aria-pressed": "false", title: HELP.mute }, () => host.toggleMute(i));
     this.soloB = key("S", null, { class: "sm", "aria-label": `Solo layer ${n}`, "aria-pressed": "false", title: HELP.solo }, () => host.toggleSolo(i));
+    this.origB = key("Orig", null, { class: "sm orig", "aria-pressed": "false", title: HELP.original }, () => host.setOriginal(i, !host.isOriginal(i)));
     this.playB = key(null, ICONS.play, { class: "sm", "aria-label": `Play the selection of layer ${n}`, "aria-pressed": "false", title: HELP.playLayer }, () => host.togglePreview(i));
     this.focusB = key(null, ICONS.focus, { class: "sm", "aria-label": `Focus layer ${n}`, title: `Focus layer ${n}` }, () => host.focus(this.mode === "editor" ? 0 : n));
     this.fileInput = h("input", { type: "file", accept: "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg,.m4a", hidden: true, "aria-label": `Audio file for layer ${n}` });
@@ -138,12 +160,12 @@ export class LayerView {
       h("span", { class: "full actions" },
         this.led,
         key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound (or drop a file here)" }, () => { host.ensureAudio(); if (!host.pickFile(i)) this.fileInput.click(); }),
-        key(null, ICONS.rec, { class: "sm", "aria-label": "Capture from the mixer", title: "Capture from the mixer" }, () => host.capture(i))),
-      this.playB, this.muteB, this.soloB, this.focusB, this.fileInput);
+        // Capture from the mixer returns with the Fourierizer Capture plugin (H8).
+        this.removeB = confirmKey(key(null, ICONS.eject, { class: "sm", "aria-label": `Remove the sound from layer ${n}`, title: HELP.remove }), () => host.removeSound(i))),
+      this.origB, this.playB, this.muteB, this.soloB, this.focusB, this.fileInput);
 
     // display
-    const yax = h("div", { class: "yax", "aria-hidden": "true" },
-      ...TICKS.map(([lbl, f, major]) => h("span", { class: `ro-sm ${major ? "major" : "minor"}`, style: `top:calc(${(freqToY(f) * 100).toFixed(2)}% - 6px)` }, lbl)));
+    const yax = this.yax = h("div", { class: "yax", "aria-hidden": "true" });
     this.canvas = h("canvas", { class: "spec" });
     this.svg = s("svg", { class: "ov", viewBox: "0 0 1000 1000", preserveAspectRatio: "none", role: "img", "aria-label": `Layer ${n} spectrogram and selections` });
     this.handles = h("div", { style: "position:absolute;inset:0;pointer-events:none" });
@@ -239,12 +261,25 @@ export class LayerView {
     this.muteB.setAttribute("aria-pressed", String(l.mute));
     this.soloB.setAttribute("aria-pressed", String(l.solo));
     this.playB.disabled = !l.loaded;
+    this.origB.disabled = !l.loaded;
+    this.removeB.disabled = !l.loaded;
+    this.origB.setAttribute("aria-pressed", String(this.host.isOriginal(this.i)));
     this.hint.textContent = l.loaded ? (l.shapes.length ? "" : "Draw on the spectrogram to select") : "Drop a sound here or press Load";
     this.hint.style.display = this.hint.textContent ? "" : "none";
     this.hint.dataset.kind = l.loaded ? "draw" : "drop";
     this.refreshParams();
     this.drawAxis();
+    this.drawYAxis();
     this.drawShapes();
+  }
+
+  private yKey = "";
+  private drawYAxis(): void {
+    const a = getAxis(), k = `${a.scale}:${a.fmin}:${a.fmax}`;
+    if (k === this.yKey) return;
+    this.yKey = k;
+    this.yax.replaceChildren(...ticks().map(([lbl, f, major]) =>
+      h("span", { class: `ro-sm ${major ? "major" : "minor"}`, style: `top:calc(${(freqToY(f) * 100).toFixed(2)}% - 6px)` }, lbl)));
   }
 
   refreshParams(): void {
@@ -277,21 +312,31 @@ export class LayerView {
   }
 
   setSpectrogram(img: { data: Uint8Array; cols: number; rows: number }): void {
-    paintSpectrogram(this.canvas, img, this.i + 1);
+    this.img = img;
+    paintSpectrogram(this.canvas, img, this.i + 1, this.host.look());
     this.hasImage = true;
+  }
+
+  /** Repaint with the current look (dB range and gain), without recomputing. */
+  repaint(): void {
+    if (this.img && this.hasImage) paintSpectrogram(this.canvas, this.img, this.i + 1, this.host.look());
   }
 
   clearSpectrogram(): void {
     if (!this.hasImage) return;
     this.canvas.getContext("2d")?.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.hasImage = false;
+    this.img = null;
   }
 
   private duration(): number { const l = this.host.state(this.i); return l.loaded ? pitchedSeconds(l) : 4; }
 
   // ---------------------------------------------------------------- shapes
   private toX(t: number): number { return t / this.duration() * 1000; }
-  private toY(f: number): number { return Math.min(1010, Math.max(-10, freqToY(Math.max(f, F_MIN * 0.5)) * 1000)); }
+  private toY(f: number): number {
+    const a = getAxis();
+    return Math.min(1010, Math.max(-10, freqToY(a.scale === "log" ? Math.max(f, a.fmin * 0.5) : f) * 1000));
+  }
 
   /** Bounding box of a shape in overlay units (0..1000). */
   private box(sh: Shape): { x0: number; y0: number; x1: number; y1: number } {
@@ -545,13 +590,14 @@ export class LayerView {
       dragged = true;
       if (act === "move") {
         if (!snapped) { snapped = true; this.host.editShapes(this.i, () => { }, { undo: true, render: false }); }
-        const du = p[0] - last[0], dv = p[1] - last[1], dt = du * this.duration(), k = (F_MAX / F_MIN) ** (-dv);
+        const du = p[0] - last[0], dv = p[1] - last[1], dt = du * this.duration();
+        const shift = (f: number) => (f <= 0 ? f : Math.max(1, yToFreq(freqToY(f) + dv)));  // follows the display axis
         last = p;
         this.host.editShapes(this.i, (shapes) => {
           const sh = shapes[target];
           if (!sh) return;
-          if (sh.kind === "rect") { sh.t = [sh.t[0] + dt, sh.t[1] + dt]; sh.f = [sh.f[0] * k, sh.f[1] * k]; }
-          else sh.points = sh.points.map(([t0, f0]) => [t0 + dt, f0 * k]);
+          if (sh.kind === "rect") { sh.t = [sh.t[0] + dt, sh.t[1] + dt]; sh.f = [shift(sh.f[0]), shift(sh.f[1])]; }
+          else sh.points = sh.points.map(([t0, f0]) => [t0 + dt, shift(f0)]);
         }, { undo: false, render: false });
       } else if (tool === "rect" || tool === "erase") {
         const x = Math.min(start[0], p[0]) * 1000, y = Math.min(start[1], p[1]) * 1000;

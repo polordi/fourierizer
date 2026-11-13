@@ -45,6 +45,23 @@ Identidad permanente del plugin: fabricante `waves_p` (`Wvsp`), plugin `Fzrz`, `
 - ✅ Prueba de punta a punta en la app **Standalone** (misma WebView2 que en FL), manejada con puppeteer por el puerto de depuración de WebView2: soltar un WAV de 44.1 kHz (se convierte a 48 kHz), espectrograma, dibujar, render, nota con el teclado de la computadora (cabezal avanza), ▶ de la capa, *Send to layer*, Max, cerrar y reabrir: **el proyecto se restaura** (capas, selección, operación, vista y resultado).
 - ⏳ Lo que solo tú puedes probar: FL Studio, tu MPK Mini, cómo suena, y arrastrar el resultado al playlist.
 
+## Ronda de feedback en FL (2026-11-13)
+
+Primera prueba en FL Studio: "está funcionando perfecto". Tres cosas que faltaban:
+
+| Nota | Qué se hizo |
+|---|---|
+| Quitar uno de los 4 sonidos, o vaciar todo | Botón ⏏ en cada capa (deja el slot vacío, con parámetros por defecto) y **New** arriba (vacía las cuatro capas y el resultado; conserva el sampler y el display). Ambos piden un segundo clic ("Sure?"), porque no se pueden deshacer. |
+| Ajustar la escala de los espectrogramas, como en Wave Candy | Panel **Display**: escala Log / Lin, frecuencia mínima y máxima, *Range* (dB visibles: contraste) y *Gain* (brillo). Se guarda en el proyecto. |
+| Comparar el sonido original de una capa contra su selección | Botón **Orig** junto al ▶: mientras suena, cambia entre la selección y el original, sincronizados y a la misma ganancia (crossfade de 12 ms). Con Orig encendido, ▶ también funciona en una capa sin selecciones. |
+
+**Range y Gain sin recalcular**
+- *En simple:* mover el contraste o el brillo es instantáneo, porque el motor ya mandó "qué tan fuerte es cada punto"; la interfaz solo vuelve a pintar.
+- *En técnico:* la imagen del espectrograma dejó de traer colores ya decididos: cada píxel trae su nivel en pasos de ½ dB por debajo del pico (0 = pico, 255 = −127.5 dB). La UI aplica ((dB + gain + range) / range)^2.4 con una tabla de 256 entradas al pintar. Cambiar la escala o el rango de frecuencias sí pide un espectrograma nuevo, porque cambian los renglones.
+
+**Mover selecciones en cualquier escala**
+- *En técnico:* arrastrar una selección ya no multiplica frecuencias por una razón fija (eso solo valía en escala log): cada frecuencia se convierte a la posición vertical del eje actual, se desplaza y se convierte de regreso.
+
 ## Cómo probarlo en FL Studio
 
 1. El plugin ya está en `%LOCALAPPDATA%\Programs\Common\VST3\Fourierizer.vst3` (la misma carpeta que el spike de H0, que ya registraste como VST3).

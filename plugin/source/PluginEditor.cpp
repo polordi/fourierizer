@@ -97,12 +97,16 @@ juce::WebBrowserComponent::Options FourierizerEditor::options() {
         .withNativeFunction("pickFile", [this](Args a, Completion done) { pickFile((int) a[0], std::move(done)); })
         .withNativeFunction("spectrogram", [this](Args a, Completion done) {
             try {
-                proc_.engine.spectrogram((int) a[0], (double) a[1], fzp::Engine::gridOf(a[2]), later(std::move(done)));
+                proc_.engine.spectrogram((int) a[0], (double) a[1], fzp::Engine::gridOf(a[2]), fzp::Engine::axisOf(a[3]), later(std::move(done)));
             } catch (const std::exception& e) { done(obj({{"error", juce::String(e.what())}})); }
         })
         .withNativeFunction("render", [this](Args a, Completion done) { proc_.engine.render(a[0], later(std::move(done))); })
         .withNativeFunction("result", [&engine](Args, Completion done) { done(engine.resultInfo()); })
-        .withNativeFunction("preview", [this](Args a, Completion done) { proc_.engine.preview(a[0], later(std::move(done))); })
+        .withNativeFunction("preview", [this](Args a, Completion done) { proc_.engine.preview(a[0], (bool) a[1], later(std::move(done))); })
+        .withNativeFunction("setPreviewOriginal", [&sampler](Args a, Completion done) { sampler.setPreviewOriginal((bool) a[0]); done(true); })
+        .withNativeFunction("resultImage", [this](Args a, Completion done) { proc_.engine.resultImage(fzp::Engine::axisOf(a[0]), later(std::move(done))); })
+        .withNativeFunction("clearLayer", [&engine](Args a, Completion done) { engine.clearSource((int) a[0]); done(true); })
+        .withNativeFunction("clearResult", [&engine](Args, Completion done) { engine.clearResult(); done(true); })
         .withNativeFunction("stopPreview", [&sampler](Args, Completion done) { sampler.stopPreview(); done(true); })
         .withNativeFunction("noteOn", [&sampler](Args a, Completion done) { sampler.uiNoteOn((int) a[0], (float) (double) a[1]); done(true); })
         .withNativeFunction("noteOff", [&sampler](Args a, Completion done) { sampler.uiNoteOff((int) a[0]); done(true); })

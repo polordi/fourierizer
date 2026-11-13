@@ -7,13 +7,14 @@ import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
-import { Fader, Knob, Segmented, Stepper, key } from "./view/controls.ts";
+import { Fader, Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./view/controls.ts";
+import { getAxis, setAxis, type Look } from "./dsp/spectrogram.ts";
 import { EXAMPLE_NAMES } from "./dsp/examples.ts";
 import { OPS, type Op } from "./dsp/ops.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { LayerJob } from "./protocol.ts";
 import {
-  SR, MAX_SECONDS, activeLayers, adsrMap, cloneShapes, emptyState, exampleState, featherOf, gridOf, noteName,
+  SR, MAX_SECONDS, DEFAULT_DISPLAY, HIGH_HZ, LOW_HZ, activeLayers, adsrMap, axisOf, cloneShapes, emptyLayer, emptyState, exampleState, featherOf, gridOf, noteName,
   type LayerState, type State, type Tool,
 } from "./model.ts";
 
@@ -41,6 +42,8 @@ class App implements LayerHost {
   private midiInputs = 0;
   private refreshers: { refresh(): void }[] = [];
   private savedJson = "";
+  private original = [false, false, false, false];   // A/B per layer: preview the original sound
+  private resultImg: { data: Uint8Array; cols: number; rows: number } | null = null;
 
   // footer elements
   private statusEl!: HTMLElement;
@@ -103,6 +106,46 @@ class App implements LayerHost {
   capture(_i: number): void {
     this.toast("Capturing from the mixer arrives with the Fourierizer Capture plugin (milestone H8).");
   }
+  isOriginal(i: number): boolean { return this.original[i]; }
+  setOriginal(i: number, on: boolean): void {
+    this.original[i] = on;
+    this.views[i].refresh();
+    if (this.previewShown === i || this.previewWanted === i) this.host.setPreviewOriginal(on);
+  }
+  look(): Look { return { rangeDb: this.st.display.rangeDb, gainDb: this.st.display.gainDb }; }
+
+  /** Empty one slot: its sound, selections and parameters. */
+  removeSound(i: number): void {
+    if (this.previewShown === i || this.previewWanted === i) this.stopPreview();
+    this.host.clearSource(i);
+    this.st.layers[i] = emptyLayer(i);
+    this.original[i] = false;
+    if (this.pickedShape?.layer === i) this.pickedShape = null;
+    this.undoStack = []; this.redoStack = [];
+    this.views[i].clearSpectrogram();
+    this.views[i].refresh();
+    this.toast(`Layer ${i + 1} is empty`);
+    this.scheduleRender(true);
+  }
+
+  /** New project: every slot and the result emptied; sampler and display settings stay. */
+  private resetAll(): void {
+    this.stopPreview();
+    for (let i = 0; i < 4; i++) this.host.clearSource(i);
+    const keep = { adsr: this.st.adsr, root: this.st.root, display: this.st.display, auto: this.st.auto };
+    this.st = { ...emptyState(), ...keep };
+    this.original = [false, false, false, false];
+    this.pickedShape = null;
+    this.undoStack = []; this.redoStack = [];
+    this.host.clearResult();
+    this.setResult(null);
+    this.syncOp();
+    this.refreshers.forEach((x) => x.refresh());
+    this.layout(false);
+    this.views.forEach((v) => { v.clearSpectrogram(); v.refresh(); });
+    this.status("Drop sounds on the layers to begin");
+  }
+
   toggleMute(i: number): void { const l = this.st.layers[i]; l.mute = !l.mute; this.views[i].refresh(); this.scheduleRender(); }
   toggleSolo(i: number): void { const l = this.st.layers[i]; l.solo = !l.solo; this.views[i].refresh(); this.scheduleRender(); }
 
@@ -114,12 +157,12 @@ class App implements LayerHost {
     if (this.previewShown === i || this.previewWanted === i) { this.stopPreview(); return; }
     const l = this.st.layers[i];
     if (!l.loaded) return;
-    if (!l.shapes.length) { this.toast(`Nothing is selected on layer ${i + 1} yet`); return; }
+    if (!l.shapes.length && !this.original[i]) { this.toast(`Nothing is selected on layer ${i + 1} yet (Orig plays the whole sound)`); return; }
     this.stopPreview();
     this.previewWanted = i;
     this.views[i].setPreviewing(true);
     const req = ++this.previewReq;
-    this.host.preview(i, this.job(l)).then((r) => {
+    this.host.preview(i, this.job(l), this.original[i]).then((r) => {
       if (req !== this.previewReq) return;
       this.previewWanted = -1;
       if (!(r.peak > 0)) { this.views[i].setPreviewing(false); this.toast(`The selection on layer ${i + 1} is silent`); return; }
@@ -163,7 +206,7 @@ class App implements LayerHost {
     if (!l.loaded) return;
     const req = ++this.specReq[i];
     try {
-      const img = await this.host.spectrogram(i, l.pitch, gridOf(l), SR);
+      const img = await this.host.spectrogram(i, l.pitch, gridOf(l), SR, getAxis());
       if (req === this.specReq[i]) this.views[i].setSpectrogram(img);
     } catch (e) { this.toast((e as Error).message); }
   }
@@ -201,7 +244,7 @@ class App implements LayerHost {
     if (this.rendering) { this.queued = true; return; }
     const active = activeLayers(this.st).filter((l) => l.levelDb > -Infinity);
     const op = this.st.op, pair = OPS.find((o) => o.id === op)!.pair;
-    if (!active.length) { this.setResult(null); this.status(this.st.layers.some((l) => l.loaded) ? "Every layer is muted" : "Load a sound to begin"); return; }
+    if (!active.length) { this.host.clearResult(); this.setResult(null); this.status(this.st.layers.some((l) => l.loaded) ? "Every layer is muted" : "Load a sound to begin"); return; }
     if (pair && (!active.includes(this.st.layers[this.st.opA]) || !active.includes(this.st.layers[this.st.opB]))) {
       this.status(`${OPS.find((o) => o.id === op)!.label} needs layers A and B loaded and unmuted`); return;
     }
@@ -213,7 +256,7 @@ class App implements LayerHost {
     const blink = window.setInterval(() => { this.leds.forEach((e, i) => (e.dataset.on = String(lit.includes(i) && i === k % 4))); k++; }, 110);
     try {
       const all = this.st.layers.map((l) => (active.includes(l) ? this.job(l) : null));
-      const r = await this.host.render({ sr: SR, op, a: this.st.opA, b: this.st.opB, layers: active.map((l) => this.job(l)), all });
+      const r = await this.host.render({ sr: SR, op, a: this.st.opA, b: this.st.opB, layers: active.map((l) => this.job(l)), all, axis: getAxis() });
       this.showResult(r);
       const used = pair ? [this.st.opA, this.st.opB] : lit;
       this.leds.forEach((e, i) => (e.dataset.on = String(used.includes(i))));
@@ -234,7 +277,8 @@ class App implements LayerHost {
 
   private setResult(r: { duration: number } | null, image?: { data: Uint8Array; cols: number; rows: number } | null): void {
     this.result = r;
-    if (r && image) paintSpectrogram(this.resultCanvas, image, 0);
+    this.resultImg = r && image ? image : null;
+    if (r && image) paintSpectrogram(this.resultCanvas, image, 0, this.look());
     else this.resultCanvas.getContext("2d")?.clearRect(0, 0, this.resultCanvas.width, this.resultCanvas.height);
     this.resultEmpty.style.display = r ? "none" : "";
     this.outKeys.toggleAttribute("data-off", !r);
@@ -315,6 +359,8 @@ class App implements LayerHost {
       h("span", { class: "grow" }),
       h("div", { class: "group" }, h("span", { class: "silk" }, "View"), viewSeg.el),
       h("div", { class: "group" }, h("span", { class: "silk" }, "Tool"), toolSeg.el),
+      h("div", { class: "group" }, this.buildDisplayPanel(),
+        confirmKey(key("New", ICONS.fresh, { class: "sm", title: HELP.fresh }), () => this.resetAll())),
       h("div", { class: "group" },
         key(null, ICONS.undo, { class: "sm", "aria-label": "Undo", title: "Undo (Ctrl+Z)" }, () => this.undo()),
         key(null, ICONS.redo, { class: "sm", "aria-label": "Redo", title: "Redo (Ctrl+Shift+Z)" }, () => this.undo(true))));
@@ -572,7 +618,11 @@ class App implements LayerHost {
       if (info) { l.name = info.name; l.samples = info.samples; l.channels = info.channels; }
     });
     if (r.params) { next.adsr = { a: r.params.a, d: r.params.d, s: r.params.s, r: r.params.r }; next.root = r.params.root; }
+    next.display = { ...DEFAULT_DISPLAY, ...next.display };
     this.st = next;
+    setAxis(axisOf(this.st.display));
+    this.original = [false, false, false, false];
+    this.displayRefresh.forEach((x) => x.refresh());
     this.savedJson = this.serialized();
     this.pickedShape = null;
     this.undoStack = []; this.redoStack = [];
@@ -587,6 +637,55 @@ class App implements LayerHost {
     if (r.result && r.result.duration > 0) this.showResult(r.result);
     else if (this.st.layers.some((l) => l.loaded)) await this.renderNow();
     else { this.setResult(null); this.status("Drop sounds on the layers to begin"); }
+  }
+
+  // ------------------------------------------------------------------ display (spectrogram look)
+  private displayRefresh: { refresh(): void }[] = [];
+
+  private buildDisplayPanel(): HTMLElement {
+    const d = () => this.st.display;
+    const panel = h("div", { class: "displaypanel fz-l0", hidden: true, role: "dialog", "aria-label": "Spectrogram display" });
+    const axisChanged = () => {
+      setAxis(axisOf(d()));
+      this.views.forEach((v, i) => { v.refresh(); if (this.st.layers[i].loaded) void this.requestSpectrogram(i); });
+      if (this.result) this.host.resultImage(getAxis()).then((img) => { if (img && this.result) { this.resultImg = img; paintSpectrogram(this.resultCanvas, img, 0, this.look()); } }).catch(() => { });
+      this.displayRefresh.forEach((x) => x.refresh());
+    };
+    const lookChanged = () => {
+      this.views.forEach((v) => v.repaint());
+      if (this.resultImg) paintSpectrogram(this.resultCanvas, this.resultImg, 0, this.look());
+    };
+    const scale = new Segmented("Scale", [{ id: "log", label: "Log", title: HELP.scale }, { id: "lin", label: "Lin", title: HELP.scale }],
+      () => d().scale, (id) => { d().scale = id as "log" | "lin"; axisChanged(); });
+    const hz = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(f));
+    const listStep = (label: string, list: number[], get: () => number, set: (v: number) => void, ok: (v: number) => boolean, tip: string) => new Stepper({
+      label, display: () => hz(get()), derived: () => "Hz", tip,
+      canStep: (dir) => { const i = list.indexOf(get()) + dir; return i >= 0 && i < list.length && ok(list[i]); },
+      step: (dir) => { const i = Math.max(0, list.indexOf(get())) + dir; if (i >= 0 && i < list.length && ok(list[i])) { set(list[i]); axisChanged(); } },
+      dragPx: 16,
+    });
+    const low = listStep("Low", LOW_HZ, () => d().fmin, (v) => { d().fmin = v; }, (v) => v < d().fmax / 2 && (v > 0 || d().scale === "lin"), HELP.lowHz);
+    const high = listStep("High", HIGH_HZ, () => d().fmax, (v) => { d().fmax = v; }, (v) => v > d().fmin * 2, HELP.highHz);
+    const range = new MiniKnob({ label: "Range", aria: "Spectrogram dB range", tip: HELP.rangeDb, reset: (58 - 24) / 96,
+      get: () => (d().rangeDb - 24) / 96, set: (v) => { d().rangeDb = Math.round(24 + v * 96); lookChanged(); }, format: () => `${d().rangeDb} dB` });
+    const gain = new MiniKnob({ label: "Gain", aria: "Spectrogram gain", tip: HELP.gainDb, reset: 0.5,
+      get: () => (d().gainDb + 30) / 60, set: (v) => { d().gainDb = Math.round(v * 60 - 30); lookChanged(); }, format: () => `${d().gainDb > 0 ? "+" : d().gainDb < 0 ? "−" : ""}${Math.abs(d().gainDb)} dB` });
+    const reset = key("Reset", null, { class: "sm", title: "Back to the default view" }, () => {
+      this.st.display = { ...DEFAULT_DISPLAY };
+      [range, gain].forEach((k) => k.refresh());
+      lookChanged(); axisChanged();
+    });
+    this.displayRefresh.push(scale, low, high, range, gain);
+    panel.append(h("div", { class: "row" }, scale.el, low.el, high.el), h("div", { class: "row" }, range.el, gain.el, h("span", { class: "grow" }), reset));
+    const button = key("Display", ICONS.display, { class: "sm", "aria-expanded": "false", title: HELP.display }, () => {
+      panel.hidden = !panel.hidden;
+      button.setAttribute("aria-pressed", String(!panel.hidden));
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!panel.hidden && !wrap.contains(e.target as Node)) { panel.hidden = true; button.setAttribute("aria-pressed", "false"); }
+    });
+    const wrap = h("div", { class: "displaywrap" }, button, panel);
+    return wrap;
   }
 
   async boot(): Promise<void> {
@@ -612,6 +711,7 @@ function fit(app: HTMLElement): void {
 }
 
 installTooltips();
+setAxis(axisOf(DEFAULT_DISPLAY));
 const root = document.getElementById("app")!;
 const app = new App();
 fit(root);

@@ -209,6 +209,21 @@ export class Fader {
   }
 }
 
+/** A destructive key: the first click arms it ("Sure?"), a second click within 2.5 s confirms. */
+export function confirmKey(b: HTMLButtonElement, action: () => void): HTMLButtonElement {
+  let saved: Node[] | null = null, timer = 0;
+  const disarm = () => { if (!saved) return; b.replaceChildren(...saved); saved = null; b.classList.remove("armed"); };
+  b.addEventListener("click", () => {
+    if (saved) { clearTimeout(timer); disarm(); action(); return; }
+    saved = [...b.childNodes];
+    b.replaceChildren(h("span", {}, "Sure?"));
+    b.classList.add("armed");
+    timer = window.setTimeout(disarm, 2500);
+  });
+  b.addEventListener("blur", () => { clearTimeout(timer); disarm(); });
+  return b;
+}
+
 export function key(label: string | null, iconPaths: string | null, attrs: Record<string, string | boolean | undefined> = {}, onClick?: (e: MouseEvent) => void): HTMLButtonElement {
   const b = h("button", { class: `key ${attrs.class ?? ""}`, type: "button", ...Object.fromEntries(Object.entries(attrs).filter(([k]) => k !== "class")) },
     iconPaths ? icon(iconPaths) : null, label ? h("span", {}, label) : null);

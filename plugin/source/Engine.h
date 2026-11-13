@@ -13,6 +13,7 @@
 
 #include <fourierizer/ops.h>
 #include <fourierizer/render.h>
+#include <fourierizer/spectrogram.h>
 
 #include <array>
 #include <functional>
@@ -40,11 +41,14 @@ public:
     void decodeBytes(int layer, juce::MemoryBlock bytes, const juce::String& name, Done done);
     void decodeFile(int layer, const juce::File& file, Done done);
     juce::var resultToLayer(int layer, const juce::String& name);
+    void clearSource(int layer);
+    void clearResult();
 
     // ---- jobs (results through `done`)
-    void spectrogram(int layer, double pitch, const fz::Grid& grid, Done done);
+    void spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done);
     void render(const juce::var& request, Done done);       // supersedes (cancels) the previous one
-    void preview(const juce::var& layerJob, Done done);
+    void resultImage(const fz::Axis& axis, Done done);       // the current result on another axis
+    void preview(const juce::var& layerJob, bool original, Done done);
 
     // ---- data the UI fetches by key through the resource provider
     std::optional<std::vector<std::byte>> blob(const juce::String& key) const;
@@ -60,6 +64,7 @@ public:
     std::function<void()> onProjectLoaded;                   // after setState (message thread)
 
     static fz::Grid gridOf(const juce::var& v);
+    static fz::Axis axisOf(const juce::var& v);
     static std::vector<fz::Shape> shapesOf(const juce::var& v);
 
 private:

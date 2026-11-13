@@ -49,9 +49,18 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         sources.set(msg.id, msg.channels);
         for (const k of pitched.keys()) if (k.startsWith(`${msg.id}:`)) pitched.delete(k);
         break;
+      case "clear":
+        sources.delete(msg.id);
+        for (const k of pitched.keys()) if (k.startsWith(`${msg.id}:`)) pitched.delete(k);
+        break;
+      case "image": {
+        const img = msg.channels.length && msg.channels[0].length ? spectrogramImage(mid(msg.channels), msg.sr, RESULT_GRID, 1400, 300, msg.axis) : null;
+        ctx.postMessage({ type: "image", req: msg.req, image: img }, img ? [img.data.buffer] : []);
+        break;
+      }
       case "spectrogram": {
         const x = mid(pitchedSource(msg.id, msg.pitch));
-        const img = spectrogramImage(x, msg.sr, msg.grid);
+        const img = spectrogramImage(x, msg.sr, msg.grid, 1400, 360, msg.axis);
         ctx.postMessage({ type: "spectrogram", req: msg.req, id: msg.id, ...img, duration: x.length / msg.sr }, [img.data.buffer]);
         break;
       }
@@ -73,7 +82,7 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         }
         const peakLin = peakOf(out);
         const chans = out.map((c) => Float32Array.from(c));
-        const img = chans.length && chans[0].length ? spectrogramImage(mid(chans), msg.sr, RESULT_GRID, 1400, 300) : null;
+        const img = chans.length && chans[0].length ? spectrogramImage(mid(chans), msg.sr, RESULT_GRID, 1400, 300, msg.axis) : null;
         const transfer: Transferable[] = chans.map((c) => c.buffer);
         if (img) transfer.push(img.data.buffer);
         ctx.postMessage({ type: "render", req: msg.req, channels: chans, peak: peakLin, ms: performance.now() - t0, image: img }, transfer);
@@ -83,7 +92,9 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         const l = msg.job;
         const y = synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct }, msg.sr);
         const chans = y.map((c) => Float32Array.from(c));
-        ctx.postMessage({ type: "layer", req: msg.req, channels: chans, peak: peakOf(y) }, chans.map((c) => c.buffer));
+        const src = pitchedSource(l.id, l.pitch), orig = src.map((c) => Float32Array.from(c));
+        ctx.postMessage({ type: "layer", req: msg.req, channels: chans, peak: peakOf(y), original: orig, peakOriginal: peakOf(src) },
+          [...chans.map((c) => c.buffer), ...orig.map((c) => c.buffer)]);
         break;
       }
     }

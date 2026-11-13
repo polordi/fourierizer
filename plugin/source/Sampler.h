@@ -33,7 +33,9 @@ public:
 
     // ---- any non-audio thread
     void setResult(SampleBuffer::Ptr buffer);
-    void playPreview(int layer, SampleBuffer::Ptr buffer, float gain);
+    /// One-shot preview of a layer: the selection and, in sync, its original sound (A/B).
+    void playPreview(int layer, SampleBuffer::Ptr selection, SampleBuffer::Ptr original, float gain, bool startOriginal);
+    void setPreviewOriginal(bool on) { previewOriginal_ = on; }
     void stopPreview();
     void uiNoteOn(int note, float velocity);
     void uiNoteOff(int note);
@@ -74,11 +76,13 @@ private:
     bool sustainPedal_ = false;
 
     SampleBuffer::Ptr current_;                         // audio thread only
-    struct Preview { SampleBuffer::Ptr buffer; double pos = 0; float gain = 1; int layer = -1; bool active = false; float fade = 1; bool stopping = false; } preview_;
+    struct Preview { SampleBuffer::Ptr buffer, original; double pos = 0; float gain = 1, mix = 0; int layer = -1; bool active = false; float fade = 1; bool stopping = false; } preview_;
+    std::atomic<bool> previewOriginal_{false};
 
     juce::SpinLock handoff_;                            // guards pending* and pool_
     SampleBuffer* pendingResult_ = nullptr;
     SampleBuffer* pendingPreview_ = nullptr;
+    SampleBuffer* pendingOriginal_ = nullptr;
     int pendingPreviewLayer_ = -1;
     float pendingPreviewGain_ = 1;
     std::atomic<bool> stopPreviewFlag_{false};

@@ -17,10 +17,13 @@ void Sampler::setResult(SampleBuffer::Ptr buffer) {
     if (buffer == nullptr) pendingResult_ = reinterpret_cast<SampleBuffer*>(this);  // sentinel: clear
 }
 
-void Sampler::playPreview(int layer, SampleBuffer::Ptr buffer, float gain) {
+void Sampler::playPreview(int layer, SampleBuffer::Ptr buffer, SampleBuffer::Ptr original, float gain, bool startOriginal) {
     const juce::SpinLock::ScopedLockType lock(handoff_);
     pool_.add(buffer);
+    if (original != nullptr) pool_.add(original);
     pendingPreview_ = buffer.get();
+    pendingOriginal_ = original.get();
+    previewOriginal_ = startOriginal && original != nullptr;
     pendingPreviewLayer_ = layer;
     pendingPreviewGain_ = gain;
     stopPreviewFlag_ = false;
@@ -38,7 +41,7 @@ void Sampler::collectGarbage() {
     const juce::SpinLock::ScopedLockType lock(handoff_);
     for (int i = pool_.size(); --i >= 0;) {
         auto* b = pool_.getObjectPointerUnchecked(i);
-        if (b->getReferenceCount() == 1 && b != pendingResult_ && b != pendingPreview_) pool_.remove(i);
+        if (b->getReferenceCount() == 1 && b != pendingResult_ && b != pendingPreview_ && b != pendingOriginal_) pool_.remove(i);
     }
 }
 
@@ -51,6 +54,8 @@ void Sampler::takePending() {
     }
     if (pendingPreview_ != nullptr) {
         preview_.buffer = pendingPreview_;
+        preview_.original = pendingOriginal_;
+        preview_.mix = previewOriginal_ ? 1.0f : 0.0f;
         preview_.layer = pendingPreviewLayer_;
         preview_.gain = pendingPreviewGain_;
         preview_.pos = 0;
@@ -58,6 +63,7 @@ void Sampler::takePending() {
         preview_.stopping = false;
         preview_.fade = 1;
         pendingPreview_ = nullptr;
+        pendingOriginal_ = nullptr;
     }
 }
 
@@ -183,14 +189,20 @@ void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& mid
         }
         if (preview_.active) {
             const auto& a = preview_.buffer->audio;
-            const int len = a.getNumSamples(), bc = a.getNumChannels();
+            const auto* o = preview_.original != nullptr ? &preview_.original->audio : nullptr;
+            const int len = a.getNumSamples(), bc = a.getNumChannels(), oc = o ? o->getNumChannels() : 0, olen = o ? o->getNumSamples() : 0;
             const double step = preview_.buffer->sampleRate / hostRate_;
+            const float target = (o != nullptr && previewOriginal_.load()) ? 1.0f : 0.0f, glide = (float) (dt / 0.012);  // 12 ms A/B crossfade
             for (int s = from; s < to; ++s) {
-                if (preview_.pos >= len || preview_.fade <= 0) { preview_.active = false; preview_.buffer = nullptr; break; }
+                if (preview_.pos >= len || preview_.fade <= 0) { preview_.active = false; preview_.buffer = nullptr; preview_.original = nullptr; break; }
                 if (preview_.stopping) preview_.fade -= (float) (dt / 0.015);  // 15 ms fade-out
-                const float g = preview_.gain * gain * std::max(0.0f, preview_.fade);
-                for (int c = 0; c < chans; ++c)
-                    out.addSample(c, s, g * hermite(a.getReadPointer(std::min(c, bc - 1)), len, preview_.pos));
+                preview_.mix += juce::jlimit(-glide, glide, target - preview_.mix);
+                const float g = preview_.gain * gain * std::max(0.0f, preview_.fade), m = preview_.mix;
+                for (int c = 0; c < chans; ++c) {
+                    float v = (1 - m) * hermite(a.getReadPointer(std::min(c, bc - 1)), len, preview_.pos);
+                    if (m > 0) v += m * hermite(o->getReadPointer(std::min(c, oc - 1)), olen, preview_.pos);
+                    out.addSample(c, s, g * v);
+                }
                 preview_.pos += step;
             }
         }

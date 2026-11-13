@@ -5,6 +5,7 @@ import type { WindowName } from "./dsp/windows.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
+import type { Axis } from "./dsp/spectrogram.ts";
 
 export const SR = 48000;
 export const MAX_SECONDS = 60;
@@ -29,6 +30,16 @@ export interface LayerState {
   shapes: Shape[];
 }
 
+/** How every spectrogram is drawn (the Display panel), like Wave Candy's spectrum settings. */
+export interface Display { scale: "log" | "lin"; fmin: number; fmax: number; rangeDb: number; gainDb: number; }
+export const DEFAULT_DISPLAY: Display = { scale: "log", fmin: 30, fmax: 20000, rangeDb: 58, gainDb: 0 };
+export const LOW_HZ = [0, 20, 30, 40, 50, 80, 100, 150, 200, 300, 500, 1000];
+export const HIGH_HZ = [1000, 2000, 3000, 4000, 5000, 8000, 10000, 12000, 16000, 20000, 24000];
+/** The axis for a display (a log axis cannot start at 0 Hz). */
+export function axisOf(d: Display): Axis {
+  return { scale: d.scale, fmin: d.scale === "log" ? Math.max(20, d.fmin) : d.fmin, fmax: Math.max(d.fmax, d.fmin + 100) };
+}
+
 export interface State {
   layers: LayerState[];
   focus: number;        // 0 = 2×2 grid, 1..4 = focused layer
@@ -40,6 +51,7 @@ export interface State {
   root: number;         // MIDI note
   adsr: { a: number; d: number; s: number; r: number }; // knob positions 0..1
   auto: boolean;
+  display: Display;
 }
 
 export const WINDOW_LABELS: Record<WindowName, string> = {
@@ -83,6 +95,9 @@ export const adsrMap = {
 const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
 export function noteName(n: number): string { return NOTE_NAMES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1); }
 
+/** A layer slot with no sound and default parameters. */
+export function emptyLayer(index: number): LayerState { return layer(index, "", []); }
+
 function layer(index: number, name: string, shapes: Shape[], extra: Partial<LayerState> = {}): LayerState {
   return {
     index, name, loaded: false, samples: 0, channels: 1, window: "hann", N: 4096, hopDiv: 8,
@@ -95,7 +110,7 @@ export function emptyState(): State {
   return {
     layers: [0, 1, 2, 3].map((i) => layer(i, "", [])),
     focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", root: 48,
-    adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true,
+    adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true, display: { ...DEFAULT_DISPLAY },
   };
 }
 
@@ -120,7 +135,7 @@ export function exampleState(): State {
       ], { levelDb: -6 }),
     ],
     focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", root: 48,
-    adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true,
+    adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true, display: { ...DEFAULT_DISPLAY },
   };
 }
 

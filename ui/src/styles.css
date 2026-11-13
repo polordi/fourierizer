@@ -39,7 +39,8 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 
 /* app frame */
 #app { box-sizing: border-box; height: 100%; min-height: 760px; min-width: 1180px; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-.top { height: 44px; flex: none; display: flex; align-items: center; gap: 24px; }
+.top { height: 44px; flex: none; display: flex; align-items: center; gap: 16px; }
+.brand .silk { white-space: nowrap; }
 .brand { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
 .wordmark { font: 800 32px/1 var(--font-sans); letter-spacing: -0.02em; }
 .group { display: flex; align-items: center; gap: 10px; }
@@ -219,3 +220,19 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .outkeys[data-off] .key { opacity: .4; pointer-events: none; }
 .outkeys .key.drag { cursor: grab; }
 .result .rhead > .seg { flex: none; }   /* the operation picker never shrinks; its hint does */
+
+/* destructive keys arm on the first click */
+.key.armed, .key.armed[aria-pressed] { background: var(--signal-rec); color: #FFFFFF; border-color: var(--ink); }
+/* A/B key: lit while the preview plays the original sound */
+.key.orig { min-width: 44px; font-size: 11px; }
+.key.orig[aria-pressed="true"] { background: var(--layer); color: var(--on-layer); }
+
+/* Display panel (spectrogram look), opened from the header */
+.displaywrap { position: relative; }
+.displaypanel { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; display: grid; gap: 14px; padding: 14px 16px; width: max-content;
+  background: var(--panel); border: 1.5px solid var(--ink); border-radius: var(--radius-md); box-shadow: 0 3px 0 var(--ink); animation: fz-pop 160ms ease-out both; }
+.displaypanel .row { display: flex; gap: 16px; align-items: flex-end; }
+.displaypanel .stepper .body { grid-template-columns: 26px minmax(52px, auto) 26px; }
+.displaypanel .stepper .val { font-size: 15px; }
+.top .seg-opt { padding: 6px 8px; min-width: 40px; }
+.top .brand { margin-right: 12px; }

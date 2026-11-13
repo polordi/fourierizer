@@ -206,9 +206,15 @@ void testSpectrogram() {
     int best = 0;
     const int col = img.cols / 2;
     for (int r = 0; r < img.rows; ++r)
-        if (img.data[r * img.cols + col] > img.data[best * img.cols + col]) best = r;
+        if (img.data[r * img.cols + col] < img.data[best * img.cols + col]) best = r;   // 0 = loudest
     const double y = (best + 0.5) / img.rows, f = kSpecFMin * std::pow(kSpecFMax / kSpecFMin, 1 - y);
-    check(std::abs(std::log2(f / 1000)) < 0.03 && img.data[best * img.cols + col] == 255, fmt("1 kHz tone lands at %.0f Hz", f));
+    check(std::abs(std::log2(f / 1000)) < 0.03 && img.data[best * img.cols + col] == 0, fmt("1 kHz tone lands at %.0f Hz", f));
+    const auto lin = spectrogramImage(x, sr, {Window::Hann, 4096, 4096, 1024}, 50, 400, {0, 4000, false});
+    int bl = 0;
+    for (int r = 0; r < lin.rows; ++r)
+        if (lin.data[r * lin.cols + col] < lin.data[bl * lin.cols + col]) bl = r;
+    const double fl = 4000 * (1 - (bl + 0.5) / lin.rows);
+    check(std::abs(fl - 1000) < 15, fmt("linear axis 0-4 kHz: tone at %.0f Hz", fl));
 }
 
 void testProperties() {

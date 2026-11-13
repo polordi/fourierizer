@@ -5,7 +5,7 @@
 
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
-import type { SpectrogramImage } from "./dsp/spectrogram.ts";
+import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
 import type { LayerJob, WorkerReply, WorkerRequest } from "./protocol.ts";
 import { Sampler } from "./audio/sampler.ts";
 import { MAX_SECONDS, SR, adsrMap } from "./model.ts";
@@ -15,7 +15,7 @@ export interface ResultInfo { image: SpectrogramImage | null; peak: number; ms: 
 export interface PlayState { result: number; preview: number; previewPos: number; voices: number; }
 export interface SamplerParams { a: number; d: number; s: number; r: number; root: number; }
 export interface Restored { project: string | null; layers: (SourceInfo | null)[]; result: ResultInfo | null; params: SamplerParams | null; }
-export interface RenderJob { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; }
+export interface RenderJob { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; axis: Axis; }
 
 export interface Host {
   readonly kind: "browser" | "plugin";
@@ -26,10 +26,16 @@ export interface Host {
   loadFile(i: number, file: File): Promise<SourceInfo>;
   /** Native file dialog (plugin), or null when the UI should use its own <input type=file>. */
   pickFile(i: number): Promise<SourceInfo | null> | null;
-  spectrogram(i: number, pitch: number, grid: Grid, sr: number): Promise<SpectrogramImage>;
+  clearSource(i: number): void;
+  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis): Promise<SpectrogramImage>;
   render(job: RenderJob): Promise<ResultInfo>;
+  /** The current result's display image on another axis (null without a result). */
+  resultImage(axis: Axis): Promise<SpectrogramImage | null>;
+  clearResult(): void;
   resultToLayer(i: number, name: string): Promise<SourceInfo>;
-  preview(i: number, job: LayerJob): Promise<{ peak: number }>;
+  /** Play a layer once: its selection, and in sync its original sound for A/B (`original`). */
+  preview(i: number, job: LayerJob, original: boolean): Promise<{ peak: number }>;
+  setPreviewOriginal(on: boolean): void;
   stopPreview(): void;
 
   ensureAudio(): void;
@@ -106,9 +112,23 @@ export class BrowserHost implements Host {
 
   pickFile(): null { return null; }
 
-  spectrogram(i: number, pitch: number, grid: Grid, sr: number): Promise<SpectrogramImage> {
-    return this.call({ type: "spectrogram", req: this.next++, id: i, pitch, grid, sr });
+  clearSource(i: number): void {
+    if (this.sampler.previewLayer === i) this.sampler.stopPreview();
+    this.worker.postMessage({ type: "clear", id: i } satisfies WorkerRequest);
   }
+
+  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis): Promise<SpectrogramImage> {
+    return this.call({ type: "spectrogram", req: this.next++, id: i, pitch, grid, sr, axis });
+  }
+
+  async resultImage(axis: Axis): Promise<SpectrogramImage | null> {
+    if (!this.result) return null;
+    const copies = this.result.map((c) => c.slice());
+    const r = await this.call<{ image: SpectrogramImage | null }>({ type: "image", req: this.next++, sr: SR, channels: copies, axis }, copies.map((c) => c.buffer));
+    return r.image;
+  }
+
+  clearResult(): void { this.result = null; this.sampler.setResult([], SR); }
 
   async render(job: RenderJob): Promise<ResultInfo> {
     const r = await this.call<{ channels: Float32Array[]; peak: number; ms: number; image: SpectrogramImage | null }>({ type: "render", req: this.next++, ...job });
@@ -123,12 +143,14 @@ export class BrowserHost implements Host {
     return this.setSourceAudio(i, name, this.result.map((c) => c.slice()));
   }
 
-  async preview(i: number, job: LayerJob): Promise<{ peak: number }> {
+  async preview(i: number, job: LayerJob, original: boolean): Promise<{ peak: number }> {
     this.sampler.stopPreview();
-    const r = await this.call<{ channels: Float32Array[]; peak: number }>({ type: "layer", req: this.next++, sr: SR, job });
-    if (r.peak > 0) this.sampler.playPreview(i, r.channels, SR, r.peak);
-    return { peak: r.peak };
+    const r = await this.call<{ channels: Float32Array[]; peak: number; original: Float32Array[]; peakOriginal: number }>({ type: "layer", req: this.next++, sr: SR, job });
+    const peak = Math.max(r.peak, r.peakOriginal);   // one gain for both, so A/B compares fairly
+    if (peak > 0) this.sampler.playPreview(i, r.channels, r.original, SR, peak > 0.977 ? 0.977 / peak : 1, original);
+    return { peak: original ? r.peakOriginal : r.peak };
   }
+  setPreviewOriginal(on: boolean): void { this.sampler.setPreviewOriginal(on); }
   stopPreview(): void { this.sampler.stopPreview(); }
 
   ensureAudio(): void { this.sampler.ensure(); }

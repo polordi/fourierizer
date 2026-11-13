@@ -4,7 +4,7 @@
 // served by the plugin's resource provider; audio files go up in base64 chunks.
 
 import type { Grid } from "./dsp/stft.ts";
-import type { SpectrogramImage } from "./dsp/spectrogram.ts";
+import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
 import type { LayerJob } from "./protocol.ts";
 import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo } from "./host.ts";
 
@@ -96,10 +96,19 @@ export class PluginHost implements Host {
     });
   }
 
-  async spectrogram(i: number, pitch: number, grid: Grid): Promise<SpectrogramImage> {
-    const r = await this.checked<ImageRef & { duration: number }>("spectrogram", i, pitch, grid);
+  clearSource(i: number): void { void this.call("clearLayer", i); }
+
+  async spectrogram(i: number, pitch: number, grid: Grid, _sr: number, axis: Axis): Promise<SpectrogramImage> {
+    const r = await this.checked<ImageRef & { duration: number }>("spectrogram", i, pitch, grid, axis);
     return (await this.image(r))!;
   }
+
+  async resultImage(axis: Axis): Promise<SpectrogramImage | null> {
+    const r = await this.call<ImageRef | null>("resultImage", axis);
+    return r && typeof r === "object" && "key" in r ? this.image(r) : null;
+  }
+
+  clearResult(): void { void this.call("clearResult"); }
 
   async render(job: RenderJob): Promise<ResultInfo> {
     const r = await this.checked<{ peak: number; ms: number; duration: number; image: ImageRef | null }>("render", job);
@@ -107,7 +116,8 @@ export class PluginHost implements Host {
   }
 
   resultToLayer(i: number, name: string): Promise<SourceInfo> { return this.checked<SourceInfo>("resultToLayer", i, name); }
-  preview(_i: number, job: LayerJob): Promise<{ peak: number }> { return this.checked<{ peak: number }>("preview", job); }
+  preview(_i: number, job: LayerJob, original: boolean): Promise<{ peak: number }> { return this.checked<{ peak: number }>("preview", job, original); }
+  setPreviewOriginal(on: boolean): void { void this.call("setPreviewOriginal", on); }
   stopPreview(): void { void this.call("stopPreview"); }
 
   ensureAudio(): void { /* the host owns the audio device */ }

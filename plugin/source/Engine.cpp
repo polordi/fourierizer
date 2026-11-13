@@ -60,6 +60,16 @@ fz::Grid Engine::gridOf(const juce::var& v) {
     return {fz::windowFromName(v["window"].toString().toStdString()), (int) v["L"], (int) v["N"], (int) v["H"]};
 }
 
+fz::Axis Engine::axisOf(const juce::var& v) {
+    fz::Axis a;
+    if (!v.isObject()) return a;
+    a.fmin = std::max(0.0, num(v["fmin"], fz::kSpecFMin));
+    a.fmax = std::max(a.fmin + 100, num(v["fmax"], fz::kSpecFMax));
+    a.log = v["scale"].toString() != "lin";
+    if (a.log) a.fmin = std::max(a.fmin, 20.0);
+    return a;
+}
+
 std::vector<fz::Shape> Engine::shapesOf(const juce::var& v) {
     std::vector<fz::Shape> out;
     if (auto* arr = v.getArray())
@@ -143,6 +153,27 @@ void Engine::decodeFile(int layer, const juce::File& file, Done done) {
     });
 }
 
+void Engine::clearSource(int layer) {
+    if (layer < 0 || layer > 3) return;
+    std::lock_guard lock(mutex_);
+    sources_[(size_t) layer] = {};
+    for (auto it = pitchCache_.begin(); it != pitchCache_.end();)
+        it = it->first.rfind(std::to_string(layer) + ":", 0) == 0 ? pitchCache_.erase(it) : std::next(it);
+    if (auto it = latestBlob_.find("spec" + juce::String(layer)); it != latestBlob_.end()) { blobs_.erase(it->second); latestBlob_.erase(it); }
+}
+
+void Engine::clearResult() {
+    {
+        std::lock_guard lock(mutex_);
+        if (renderCancel_) *renderCancel_ = true;
+        result_ = nullptr;
+        resultInfo_ = juce::var();
+        lastRequest_ = juce::var();
+    }
+    sampler_.setResult(nullptr);
+    resultWav_.deleteFile();
+}
+
 juce::var Engine::resultToLayer(int layer, const juce::String& name) {
     std::shared_ptr<const fz::Channels> r;
     {
@@ -188,12 +219,12 @@ std::optional<std::vector<std::byte>> Engine::blob(const juce::String& key) cons
 }
 
 // ------------------------------------------------------------------------------ jobs
-void Engine::spectrogram(int layer, double pitch, const fz::Grid& grid, Done done) {
-    run(pool_, "spectrogram", [this, layer, pitch, grid, done] {
+void Engine::spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done) {
+    run(pool_, "spectrogram", [this, layer, pitch, grid, axis, done] {
         try {
             auto x = pitched(layer, pitch);
             if (x == nullptr) return done(errorVar("no audio in layer " + juce::String(layer + 1)));
-            const auto img = fz::spectrogramImage(fz::midOf(*x), kProjectRate, grid);
+            const auto img = fz::spectrogramImage(fz::midOf(*x), kProjectRate, grid, 1400, 360, axis);
             const auto key = putBlob("spec" + juce::String(layer), toBytes(img.data));
             done(obj({{"key", key}, {"cols", img.cols}, {"rows", img.rows}, {"duration", (double) (*x)[0].size() / kProjectRate}}));
         } catch (const std::exception& e) { done(errorVar(e.what())); }
@@ -262,7 +293,7 @@ void Engine::runRender(const juce::var& request, std::shared_ptr<std::atomic<boo
 
         juce::var image;
         if (n > 0) {
-            const auto img = fz::spectrogramImage(fz::midOf(y), kProjectRate, kResultGrid, 1400, 300);
+            const auto img = fz::spectrogramImage(fz::midOf(y), kProjectRate, kResultGrid, 1400, 300, axisOf(request["axis"]));
             image = obj({{"key", putBlob("result", toBytes(img.data))}, {"cols", img.cols}, {"rows", img.rows}});
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
@@ -280,8 +311,21 @@ void Engine::runRender(const juce::var& request, std::shared_ptr<std::atomic<boo
     }
 }
 
-void Engine::preview(const juce::var& l, Done done) {
-    run(pool_, "preview", [this, l, done] {
+void Engine::resultImage(const fz::Axis& axis, Done done) {
+    run(pool_, "image", [this, axis, done] {
+        std::shared_ptr<const fz::Channels> r;
+        {
+            std::lock_guard lock(mutex_);
+            r = result_;
+        }
+        if (r == nullptr || r->empty() || (*r)[0].empty()) return done(juce::var());
+        const auto img = fz::spectrogramImage(fz::midOf(*r), kProjectRate, kResultGrid, 1400, 300, axis);
+        done(obj({{"key", putBlob("result", toBytes(img.data))}, {"cols", img.cols}, {"rows", img.rows}}));
+    });
+}
+
+void Engine::preview(const juce::var& l, bool original, Done done) {
+    run(pool_, "preview", [this, l, original, done] {
         try {
             const int layer = (int) l["id"];
             auto x = pitched(layer, num(l["pitch"]));
@@ -290,17 +334,19 @@ void Engine::preview(const juce::var& l, Done done) {
             in.featherS = num(l["featherS"], 0.01);
             in.featherOct = num(l["featherOct"], 1.0 / 12);
             const auto y = fz::synthesizeLayer(in, kProjectRate);
-            const double peak = fz::peakOf(y);
-            if (peak > 0) {
+            const double peakSel = fz::peakOf(y), peakOrig = fz::peakOf(*x), peak = std::max(peakSel, peakOrig);
+            auto toBuffer = [](const fz::Channels& c) {
                 SampleBuffer::Ptr buf = new SampleBuffer();
                 buf->sampleRate = kProjectRate;
-                const int n = (int) y[0].size(), bc = (int) y.size();
+                const int n = (int) c[0].size(), bc = (int) c.size();
                 buf->audio.setSize(bc, n);
-                for (int c = 0; c < bc; ++c)
-                    for (int i = 0; i < n; ++i) buf->audio.setSample(c, i, (float) y[(size_t) c][(size_t) i]);
-                sampler_.playPreview(layer, buf, peak > 0.977 ? (float) (0.977 / peak) : 1.0f);
-            }
-            done(obj({{"peak", peak}, {"duration", (double) (*x)[0].size() / kProjectRate}}));
+                for (int ch = 0; ch < bc; ++ch)
+                    for (int i = 0; i < n; ++i) buf->audio.setSample(ch, i, (float) c[(size_t) ch][(size_t) i]);
+                return buf;
+            };
+            if (peak > 0)  // one gain for both, so the A/B comparison is fair
+                sampler_.playPreview(layer, toBuffer(y), toBuffer(*x), peak > 0.977 ? (float) (0.977 / peak) : 1.0f, original);
+            done(obj({{"peak", original ? peakOrig : peakSel}, {"duration", (double) (*x)[0].size() / kProjectRate}}));
         } catch (const std::exception& e) { done(errorVar(e.what())); }
     });
 }
