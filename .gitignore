@@ -25,3 +25,6 @@ docs/theory/*.blg
 docs/theory/*.fls
 docs/theory/*.fdb_latexmk
 docs/theory/main.pdf
+
+# UI build output (rebuilt by npm run build / CI)
+ui/dist/

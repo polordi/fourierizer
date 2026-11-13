@@ -95,6 +95,28 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
 
+  ui:
+    name: UI and web engine
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test            # must reproduce python/golden/data to 1e-9
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fourierizer-ui
+          path: ui/dist/
+
   theory:
     name: Theory document (PDF)
     runs-on: ubuntu-latest
