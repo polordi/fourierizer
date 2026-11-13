@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: cmake --build build/release --parallel
 
+      - name: Core golden tests
+        shell: bash
+        run: ctest --test-dir build/release/core --output-on-failure
+
       - name: Download pluginval
         shell: bash
         run: |
@@ -80,6 +84,20 @@ jobs:
           name: plugins-${{ runner.os }}
           path: build/release/spikes/*/*_artefacts/Release/VST3/*.vst3
           if-no-files-found: error
+
+  core-linux:
+    name: C++ core (Linux, GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S core -B build/core -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/core --parallel
+      - name: Golden tests          # must reproduce python/golden/data to 1e-9
+        run: ctest --test-dir build/core --output-on-failure
+      - name: Benchmark (10 s of audio per layer)
+        run: build/core/fourierizer-core-bench 10
 
   python-reference:
     name: Python reference engine

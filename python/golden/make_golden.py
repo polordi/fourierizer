@@ -16,6 +16,7 @@ from fourierizer_ref.windows import WINDOWS, make_window          # noqa: E402
 from fourierizer_ref.stft import Grid                              # noqa: E402
 from fourierizer_ref.mask import Rect, Polygon, Selection          # noqa: E402
 from fourierizer_ref.render import Layer, render                   # noqa: E402
+from fourierizer_ref.audio import resample_by_step                 # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "data"
 SR = 8000
@@ -98,6 +99,12 @@ def main() -> None:
     mask_doc = {"shapes": [shape_json(s) for s in fades.shapes], "times": arr(times), "freqs": arr(freqs),
                 "M": arr(fades.rasterize(times, freqs))}
     (OUT / "masks.json").write_text(json.dumps(mask_doc))
+
+    # Resampler: Tape transpositions and sample-rate conversions (import of 44.1 kHz files).
+    xr = 0.6 * np.sin(2 * np.pi * 0.031 * np.arange(1500)) + 0.3 * rng.standard_normal(1500)
+    steps = [2 ** (7 / 12), 2 ** (-5 / 12), 2.0, 44100 / 48000, 48000 / 44100]
+    resample_doc = {"x": arr(xr), "cases": [{"step": s, "y": arr(resample_by_step(xr, s))} for s in steps]}
+    (OUT / "resample.json").write_text(json.dumps(resample_doc))
     print("golden files written to", OUT)
 
 

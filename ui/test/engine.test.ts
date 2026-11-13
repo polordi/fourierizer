@@ -9,7 +9,7 @@ import { makeWindow, type WindowName } from "../src/dsp/windows.ts";
 import { RealFFT } from "../src/dsp/fft.ts";
 import { synthesizeLayer, render } from "../src/dsp/render.ts";
 import { renderOp } from "../src/dsp/ops.ts";
-import { tapePitch } from "../src/dsp/resample.ts";
+import { resampleByStep, tapePitch } from "../src/dsp/resample.ts";
 import { spectrogramImage } from "../src/dsp/spectrogram.ts";
 import { SelectionRaster, logFreqs, type Shape } from "../src/dsp/mask.ts";
 import type { Grid } from "../src/dsp/stft.ts";
@@ -56,6 +56,16 @@ test("selection masks with time fades match Selection.rasterize", () => {
   let worst = 0;
   g.times.forEach((t: number, m: number) => { raster.row(t, P, row); worst = Math.max(worst, maxAbsDiff(row, g.M[m])); });
   assert.ok(worst < 1e-9, `max diff ${worst}`);
+});
+
+test("resampler (Tape pitch and sample-rate conversion) matches resample_by_step", () => {
+  const g = load("resample.json");
+  for (const c of g.cases) {
+    const y = resampleByStep(g.x, c.step);
+    assert.equal(y.length, c.y.length, `step ${c.step}: length`);
+    const d = maxAbsDiff(y, c.y);
+    assert.ok(d < 1e-9, `step ${c.step}: max diff ${d}`);
+  }
 });
 
 test("render (gain, offset, monoâ†’stereo, normalization) matches", () => {
