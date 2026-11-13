@@ -5,8 +5,8 @@ import { h, icon, s, ICONS, screws } from "./dom.ts";
 import { Knob, MiniKnob, Segmented, Stepper, key } from "./controls.ts";
 import { freqToY, yToFreq, F_MIN, F_MAX } from "../dsp/spectrogram.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
-import type { Shape } from "../dsp/mask.ts";
-import { SR, WINDOW_LABELS, featherLabel, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
+import { F_FLOOR, envelope, rowIntervals, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
+import { SR, WINDOW_LABELS, fadeLabel, fadeToKnob, featherLabel, knobToFade, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
 
 export type Mode = "grid" | "editor" | "rail";
 
@@ -201,6 +201,7 @@ export class LayerView {
     this.el = h("section", { class: `module lm fz-l${n} mode-grid`, "aria-label": `Layer ${n}` }, ...screws(), head, body, chips, params);
     this.wirePointer();
     this.wireDrop();
+    new ResizeObserver(() => this.positionBar()).observe(this.display);
     this.refresh();
   }
 
@@ -271,71 +272,196 @@ export class LayerView {
   private toX(t: number): number { return t / this.duration() * 1000; }
   private toY(f: number): number { return Math.min(1010, Math.max(-10, freqToY(Math.max(f, F_MIN * 0.5)) * 1000)); }
 
-  drawShapes(preview?: SVGElement): void {
-    const l = this.host.state(this.i), picked = this.host.picked();
-    this.svg.replaceChildren();
-    l.shapes.forEach((sh, k) => {
-      const isPicked = !!picked && picked.layer === this.i && picked.shape === k;
-      const cls = `sel${sh.mode === "subtract" ? " sub" : ""}${isPicked ? " picked" : ""}`;
-      if (sh.kind === "rect") {
-        const x0 = Math.max(-10, this.toX(sh.t[0])), x1 = Math.min(1010, this.toX(sh.t[1]));
-        const y0 = this.toY(sh.f[1]), y1 = this.toY(sh.f[0]);
-        this.svg.append(s("rect", { class: cls, x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) }));
-      } else {
-        this.svg.append(s("polygon", { class: cls, points: sh.points.map(([t, f]) => `${this.toX(t)},${this.toY(f)}`).join(" ") }));
-      }
-    });
-    if (preview) this.svg.append(preview);
-    this.drawHandles();
+  /** Bounding box of a shape in overlay units (0..1000). */
+  private box(sh: Shape): { x0: number; y0: number; x1: number; y1: number } {
+    if (sh.kind === "rect") return { x0: Math.max(-10, this.toX(sh.t[0])), x1: Math.min(1010, this.toX(sh.t[1])), y0: this.toY(sh.f[1]), y1: this.toY(sh.f[0]) };
+    const xs = sh.points.map((q) => this.toX(q[0])), ys = sh.points.map((q) => this.toY(q[1]));
+    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
   }
 
-  private handlePoints(sh: Shape): { x: number; y: number; set: (t: number, f: number) => void }[] {
-    if (sh.kind === "poly") return sh.points.map((p) => ({ x: this.toX(p[0]) / 10, y: this.toY(p[1]) / 10, set: (t: number, f: number) => { p[0] = t; p[1] = f; } }));
-    const r = sh;
-    return [
-      { x: this.toX(r.t[0]) / 10, y: this.toY(r.f[1]) / 10, set: (t: number, f: number) => { r.t[0] = t; r.f[1] = f; } },
-      { x: this.toX(r.t[1]) / 10, y: this.toY(r.f[1]) / 10, set: (t: number, f: number) => { r.t[1] = t; r.f[1] = f; } },
-      { x: this.toX(r.t[0]) / 10, y: this.toY(r.f[0]) / 10, set: (t: number, f: number) => { r.t[0] = t; r.f[0] = f; } },
-      { x: this.toX(r.t[1]) / 10, y: this.toY(r.f[0]) / 10, set: (t: number, f: number) => { r.t[1] = t; r.f[0] = f; } },
-    ];
+  private pickedHere(): number {
+    const p = this.host.picked();
+    return p && p.layer === this.i && this.host.state(this.i).shapes[p.shape] ? p.shape : -1;
+  }
+
+  private fadeCache = new Map<string, string>();
+  /** Grayscale picture of the fade envelope E over the shape's box (white = full level), exactly as the engine applies it. */
+  private fadeImage(sh: Shape, b: { x0: number; y0: number; x1: number; y1: number }): string {
+    const dur = this.duration(), k = `${JSON.stringify(sh)}|${dur}|${b.x0},${b.y0},${b.x1},${b.y1}`;
+    const hit = this.fadeCache.get(k);
+    if (hit) return hit;
+    const cols = 192, rows = sh.kind === "rect" ? 1 : 72;
+    const c = document.createElement("canvas"); c.width = cols; c.height = rows;
+    const ctx = c.getContext("2d")!, img = ctx.createImageData(cols, rows);
+    for (let r = 0; r < rows; r++) {
+      const y = b.y0 + (r + 0.5) / rows * (b.y1 - b.y0);
+      const iv = rowIntervals(sh, Math.log2(Math.max(yToFreq(y / 1000), F_FLOOR)));
+      for (let q = 0; q < cols; q++) {
+        const t = (b.x0 + (q + 0.5) / cols * (b.x1 - b.x0)) / 1000 * dur;
+        const v = Math.round(255 * envelope(t, iv, sh.fadeIn ?? 0, sh.fadeOut ?? 0)), o = (r * cols + q) * 4;
+        img.data[o] = img.data[o + 1] = img.data[o + 2] = v; img.data[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const url = c.toDataURL();
+    if (this.fadeCache.size > 48) this.fadeCache.clear();
+    this.fadeCache.set(k, url);
+    return url;
+  }
+
+  drawShapes(preview?: SVGElement): void {
+    const l = this.host.state(this.i), pk = this.pickedHere();
+    this.svg.replaceChildren();
+    const defs = s("defs");
+    this.svg.append(defs);
+    l.shapes.forEach((sh, k) => {
+      const cls = `sel${sh.mode === "subtract" ? " sub" : ""}${k === pk ? " picked" : ""}`;
+      const geom = (): SVGElement => {
+        if (sh.kind === "poly") return s("polygon", { class: cls, points: sh.points.map(([t, f]) => `${this.toX(t)},${this.toY(f)}`).join(" ") });
+        const b = this.box(sh);
+        return s("rect", { class: cls, x: b.x0, y: b.y0, width: Math.max(0, b.x1 - b.x0), height: Math.max(0, b.y1 - b.y0) });
+      };
+      if ((sh.fadeIn ?? 0) > 0 || (sh.fadeOut ?? 0) > 0) {
+        // The fill follows the fade envelope; the outline stays solid so the shape is still easy to grab.
+        const b = this.box(sh), id = `fz-fade-${this.i}-${k}`;
+        const m = s("mask", { id, maskUnits: "userSpaceOnUse", x: -20, y: -20, width: 1040, height: 1040 });
+        m.append(s("image", { href: this.fadeImage(sh, b), x: b.x0, y: b.y0, width: Math.max(0, b.x1 - b.x0), height: Math.max(0, b.y1 - b.y0), preserveAspectRatio: "none" }));
+        defs.append(m);
+        const fill = geom(), line = geom();
+        fill.setAttribute("mask", `url(#${id})`); fill.style.stroke = "none";
+        line.style.fill = "none"; line.style.pointerEvents = "none";
+        this.svg.append(fill, line);
+      } else this.svg.append(geom());
+    });
+    const sh = pk >= 0 ? l.shapes[pk] : undefined;
+    if (sh?.kind === "poly" && this.mode !== "rail") {
+      const b = this.box(sh);
+      this.svg.append(s("rect", { class: "bbox", x: b.x0, y: b.y0, width: b.x1 - b.x0, height: b.y1 - b.y0 }));
+    }
+    if (preview) this.svg.append(preview);
+    this.drawHandles();
+    this.drawBar();
+  }
+
+  /** Handles of the picked shape. A rectangle resizes freely from its 8 handles; a lasso scales
+   *  proportionally from the 4 corners of its box, about the opposite corner. */
+  private handleSpecs(sh: Shape): { x: number; y: number; cursor: string; round?: boolean; apply: (orig: Shape, p: [number, number]) => Shape }[] {
+    const b = this.box(sh), xm = (b.x0 + b.x1) / 2, ym = (b.y0 + b.y1) / 2, dur = this.duration();
+    if (sh.kind === "rect") {
+      const spec = (x: number, y: number, cursor: string, tx: 0 | 1 | null, fy: 0 | 1 | null) => ({
+        x, y, cursor,
+        apply: (orig: Shape, p: [number, number]): Shape => {
+          const r = JSON.parse(JSON.stringify(orig)) as RectShape;
+          if (tx !== null) r.t[tx] = p[0] * dur;
+          if (fy !== null) r.f[fy] = yToFreq(p[1]);
+          r.t.sort((a, c) => a - c); r.f.sort((a, c) => a - c);
+          return r;
+        },
+      });
+      return [
+        spec(b.x0, b.y0, "nwse-resize", 0, 1), spec(xm, b.y0, "ns-resize", null, 1), spec(b.x1, b.y0, "nesw-resize", 1, 1), spec(b.x1, ym, "ew-resize", 1, null),
+        spec(b.x1, b.y1, "nwse-resize", 1, 0), spec(xm, b.y1, "ns-resize", null, 0), spec(b.x0, b.y1, "nesw-resize", 0, 0), spec(b.x0, ym, "ew-resize", 0, null),
+      ];
+    }
+    const corner = (x: number, y: number, cursor: string, cx: 0 | 1, cy: 0 | 1) => ({
+      x, y, cursor, round: true,
+      apply: (orig: Shape, p: [number, number]): Shape => {
+        const o = orig as PolyShape, uv = o.points.map(([t, f]) => [t / dur, freqToY(Math.max(f, 1e-6))]);
+        const us = uv.map((q) => q[0]), vs = uv.map((q) => q[1]);
+        const U = [Math.min(...us), Math.max(...us)], V = [Math.min(...vs), Math.max(...vs)];
+        const a = [U[1 - cx], V[1 - cy]], c = [U[cx], V[cy]];
+        const W = this.display.clientWidth || 1, H = this.display.clientHeight || 1;
+        const ex = (c[0] - a[0]) * W, ey = (c[1] - a[1]) * H, len = ex * ex + ey * ey;
+        const k = len > 0 ? Math.min(20, Math.max(0.05, ((p[0] - a[0]) * W * ex + (p[1] - a[1]) * H * ey) / len)) : 1;
+        return { ...o, points: uv.map(([u, v]) => [(a[0] + k * (u - a[0])) * dur, yToFreq(a[1] + k * (v - a[1]))] as [number, number]) };
+      },
+    });
+    return [corner(b.x0, b.y0, "nwse-resize", 0, 0), corner(b.x1, b.y0, "nesw-resize", 1, 0), corner(b.x1, b.y1, "nwse-resize", 1, 1), corner(b.x0, b.y1, "nesw-resize", 0, 1)];
   }
 
   private handleKey = "";
   private drawHandles(): void {
-    const picked = this.host.picked();
-    const sh = picked && picked.layer === this.i ? this.host.state(this.i).shapes[picked.shape] : undefined;
-    if (this.mode !== "editor" || !picked || !sh || this.host.tool() !== "move") { this.handles.replaceChildren(); this.handleKey = ""; return; }
-    const pts = this.handlePoints(sh), k0 = `${picked.shape}:${pts.length}`;
+    const pk = this.pickedHere();
+    const sh = pk >= 0 ? this.host.state(this.i).shapes[pk] : undefined;
+    const old = () => this.handles.querySelectorAll<HTMLElement>(".hd");
+    if (this.mode === "rail" || !sh) { old().forEach((e) => e.remove()); this.handleKey = ""; return; }
+    const specs = this.handleSpecs(sh), k0 = `${pk}:${sh.kind}`;
     if (k0 === this.handleKey) {
       // Same handles: move them in place so a handle being dragged keeps its pointer capture.
-      pts.forEach((hp, k) => { const el = this.handles.children[k] as HTMLElement; el.style.left = `${hp.x}%`; el.style.top = `${hp.y}%`; });
+      const els = old();
+      specs.forEach((hp, k) => { els[k].style.left = `${hp.x / 10}%`; els[k].style.top = `${hp.y / 10}%`; });
       return;
     }
     this.handleKey = k0;
-    this.handles.replaceChildren();
-    pts.forEach((hp, k) => {
-      const el = h("span", { class: "hd", style: `left:${hp.x}%;top:${hp.y}%;pointer-events:auto`, title: "Drag to reshape" });
+    old().forEach((e) => e.remove());
+    specs.forEach((hp, k) => {
+      const el = h("span", { class: `hd${hp.round ? " rd" : ""}`, style: `left:${hp.x / 10}%;top:${hp.y / 10}%;cursor:${hp.cursor}`, title: sh.kind === "rect" ? "Drag to resize" : "Drag to scale (keeps proportions)" });
       el.addEventListener("pointerdown", (e) => {
-        e.stopPropagation(); el.setPointerCapture(e.pointerId);
-        this.host.editShapes(this.i, () => { }, { undo: true, render: false });
+        if (e.button !== 0) return;
+        e.stopPropagation(); e.preventDefault(); el.setPointerCapture(e.pointerId);
+        const orig = JSON.parse(JSON.stringify(this.host.state(this.i).shapes[pk])) as Shape;
+        let moved = false;
         const move = (ev: PointerEvent) => {
-          const [t, f] = this.toTF(ev);
-          this.host.editShapes(this.i, (shapes) => {
-            const target = shapes[picked.shape];
-            if (target) this.handlePoints(target)[k].set(t, f);
-          }, { undo: false, render: false });
+          if (!moved) { moved = true; this.host.editShapes(this.i, () => { }, { undo: true, render: false }); }
+          const p = this.rel(ev);
+          this.host.editShapes(this.i, (shapes) => { if (shapes[pk]) shapes[pk] = this.handleSpecs(orig)[k].apply(orig, p); }, { undo: false, render: false });
         };
         const up = () => {
-          el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up);
-          this.host.editShapes(this.i, (shapes) => {
-            const r = shapes[picked.shape];
-            if (r && r.kind === "rect") { r.t.sort((a, b) => a - b); r.f.sort((a, b) => a - b); }
-          }, { undo: false, render: true });
+          el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+          if (moved) this.host.editShapes(this.i, () => { }, { undo: false, render: true });
         };
-        el.addEventListener("pointermove", move); el.addEventListener("pointerup", up);
+        el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
       });
       this.handles.append(el);
     });
+  }
+
+  // ---------------------------------------------------------------- floating bar of the picked shape
+  private bar: HTMLElement | null = null;
+  private barKey = "";
+  private barKnobs: MiniKnob[] = [];
+  private drawBar(): void {
+    const pk = this.pickedHere();
+    if (this.mode === "rail" || pk < 0) { this.bar?.remove(); this.bar = null; this.barKey = ""; return; }
+    if (this.barKey !== String(pk) || !this.bar) {
+      this.bar?.remove();
+      this.barKey = String(pk);
+      const cur = () => this.host.state(this.i).shapes[pk];
+      let gesture = false;
+      const knob = (which: "fadeIn" | "fadeOut", label: string) => new MiniKnob({
+        label, aria: `${label} of the selected area`, get: () => fadeToKnob(cur()?.[which] ?? 0), reset: 0,
+        format: (v) => fadeLabel(knobToFade(v)),
+        set: (v) => {
+          this.host.editShapes(this.i, (shapes) => { const t = shapes[pk]; if (t) t[which] = knobToFade(v); }, { undo: !gesture, render: true });
+          gesture = true;
+        },
+      });
+      this.barKnobs = [knob("fadeIn", "Fade in"), knob("fadeOut", "Fade out")];
+      const del = key(null, ICONS.clear, { class: "sm", "aria-label": "Delete this selection", title: "Delete this selection (Del)" }, () => {
+        this.host.setPicked(null);
+        this.host.editShapes(this.i, (shapes) => { shapes.splice(pk, 1); });
+      });
+      this.bar = h("div", { class: "shapebar", role: "group", "aria-label": "Selected area" },
+        ...this.barKnobs.map((k) => k.el), h("span", { class: "vseam", "aria-hidden": "true" }), del);
+      // One undo step per knob gesture (a drag, or each key press).
+      this.bar.addEventListener("pointerdown", () => { gesture = false; }, true);
+      this.bar.addEventListener("keydown", () => { gesture = false; }, true);
+      this.handles.append(this.bar);
+    } else this.barKnobs.forEach((k) => k.refresh());
+    this.positionBar();
+  }
+
+  /** Above the box's right end; below it if there is no room; inside the top if neither fits. */
+  private positionBar(): void {
+    const pk = this.pickedHere();
+    if (!this.bar || pk < 0) return;
+    const b = this.box(this.host.state(this.i).shapes[pk]);
+    const W = this.display.clientWidth, H = this.display.clientHeight, bw = this.bar.offsetWidth, bh = this.bar.offsetHeight;
+    const x = Math.min(W - bw - 4, Math.max(4, b.x1 / 1000 * W - bw));
+    let y = b.y0 / 1000 * H - bh - 10;
+    if (y < 4) y = b.y1 / 1000 * H + 10;
+    if (y + bh > H - 4) y = Math.max(4, b.y0 / 1000 * H + 12);
+    this.bar.style.left = `${x}px`; this.bar.style.top = `${y}px`;
   }
 
   private rel(e: PointerEvent): [number, number] {
@@ -347,19 +473,26 @@ export class LayerView {
     return [u * this.duration(), yToFreq(v)];
   }
 
+  private inside(sh: Shape, u: number, v: number): boolean {
+    if (sh.kind === "rect") return u * 1000 >= this.toX(sh.t[0]) && u * 1000 <= this.toX(sh.t[1]) && v * 1000 >= this.toY(sh.f[1]) && v * 1000 <= this.toY(sh.f[0]);
+    return inPoly(u * 1000, v * 1000, sh.points.map(([t, f]) => [this.toX(t), this.toY(f)]));
+  }
+
+  /** Shape under the point: the picked one first, then the topmost. */
   private hit(u: number, v: number): number {
-    const shapes = this.host.state(this.i).shapes;
-    for (let k = shapes.length - 1; k >= 0; k--) {
-      const sh = shapes[k];
-      if (sh.kind === "rect") {
-        if (u * 1000 >= this.toX(sh.t[0]) && u * 1000 <= this.toX(sh.t[1]) && v * 1000 >= this.toY(sh.f[1]) && v * 1000 <= this.toY(sh.f[0])) return k;
-      } else if (inPoly(u * 1000, v * 1000, sh.points.map(([t, f]) => [this.toX(t), this.toY(f)]))) return k;
-    }
+    const shapes = this.host.state(this.i).shapes, pk = this.pickedHere();
+    if (pk >= 0 && this.inside(shapes[pk], u, v)) return pk;
+    for (let k = shapes.length - 1; k >= 0; k--) if (this.inside(shapes[k], u, v)) return k;
     return -1;
   }
 
+  /** Pointer gestures on the display:
+   *  - drag on empty space (or on a shape that is not picked) draws with the current tool;
+   *  - click on a shape picks it (handles + fade/delete bar); click on empty space drops it;
+   *  - drag on the picked shape moves it (with the Move tool, any shape). */
   private wirePointer(): void {
-    let start: [number, number] | null = null, lasso: [number, number][] = [], subtract = false, moving = -1, last: [number, number] = [0, 0], dragged = false;
+    let act: "none" | "draw" | "move" = "none", start: [number, number] = [0, 0], last: [number, number] = [0, 0];
+    let lasso: [number, number][] = [], subtract = false, target = -1, dragged = false, snapped = false;
     const n = this.i + 1;
     this.svg.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -367,60 +500,70 @@ export class LayerView {
       if (this.mode === "rail") { this.host.focus(n); return; }
       if (!this.host.state(this.i).loaded) { this.fileInput.click(); return; }
       this.svg.setPointerCapture(e.pointerId);
-      const tool = this.host.tool(), p = this.rel(e);
-      start = p; last = p; dragged = false;
-      subtract = tool === "erase" || e.altKey;
-      if (tool === "lasso") lasso = [p];
-      if (tool === "move") {
-        moving = this.hit(p[0], p[1]);
-        this.host.setPicked(moving >= 0 ? { layer: this.i, shape: moving } : null);
-        if (moving >= 0) this.host.editShapes(this.i, () => { }, { undo: true, render: false });
+      const tool = this.host.tool(), p = this.rel(e), pk = this.pickedHere();
+      start = p; last = p; dragged = false; snapped = false;
+      target = this.hit(p[0], p[1]);
+      if (target >= 0 && (tool === "move" || target === pk)) {
+        act = "move";
+        if (target !== pk) this.host.setPicked({ layer: this.i, shape: target });
+      } else if (tool === "move") {
+        act = "none";
+        this.host.setPicked(null);
+      } else {
+        act = "draw";
+        subtract = tool === "erase" || e.altKey;
+        lasso = tool === "lasso" ? [p] : [];
       }
     });
     this.svg.addEventListener("pointermove", (e) => {
       const [t, f] = this.toTF(e);
       if (this.mode === "editor") this.cursor.textContent = `${t.toFixed(3)} s · ${f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : f.toFixed(0) + " Hz"}`;
-      if (!start || !this.svg.hasPointerCapture(e.pointerId)) return;
-      const p = this.rel(e), tool = this.host.tool();
+      if (act === "none" || !this.svg.hasPointerCapture(e.pointerId)) return;
+      const p = this.rel(e), r = this.svg.getBoundingClientRect(), tool = this.host.tool();
+      if (!dragged && Math.hypot((p[0] - start[0]) * r.width, (p[1] - start[1]) * r.height) < 3) return;
       dragged = true;
-      if (tool === "rect" || tool === "erase") {
-        const x = Math.min(start[0], p[0]) * 1000, y = Math.min(start[1], p[1]) * 1000;
-        this.drawShapes(s("rect", { class: subtract ? "preview" : "preview", x, y, width: Math.abs(p[0] - start[0]) * 1000, height: Math.abs(p[1] - start[1]) * 1000 }));
-      } else if (tool === "lasso") {
-        const r = this.svg.getBoundingClientRect(), prev = lasso[lasso.length - 1];
-        if (Math.hypot((p[0] - prev[0]) * r.width, (p[1] - prev[1]) * r.height) > 3) lasso.push(p);
-        this.drawShapes(s("polyline", { class: "preview", points: lasso.map(([u, v]) => `${u * 1000},${v * 1000}`).join(" ") }));
-      } else if (tool === "move" && moving >= 0) {
+      if (act === "move") {
+        if (!snapped) { snapped = true; this.host.editShapes(this.i, () => { }, { undo: true, render: false }); }
         const du = p[0] - last[0], dv = p[1] - last[1], dt = du * this.duration(), k = (F_MAX / F_MIN) ** (-dv);
         last = p;
         this.host.editShapes(this.i, (shapes) => {
-          const sh = shapes[moving];
+          const sh = shapes[target];
           if (!sh) return;
           if (sh.kind === "rect") { sh.t = [sh.t[0] + dt, sh.t[1] + dt]; sh.f = [sh.f[0] * k, sh.f[1] * k]; }
           else sh.points = sh.points.map(([t0, f0]) => [t0 + dt, f0 * k]);
         }, { undo: false, render: false });
+      } else if (tool === "rect" || tool === "erase") {
+        const x = Math.min(start[0], p[0]) * 1000, y = Math.min(start[1], p[1]) * 1000;
+        this.drawShapes(s("rect", { class: "preview", x, y, width: Math.abs(p[0] - start[0]) * 1000, height: Math.abs(p[1] - start[1]) * 1000 }));
+      } else if (tool === "lasso") {
+        const prev = lasso[lasso.length - 1];
+        if (Math.hypot((p[0] - prev[0]) * r.width, (p[1] - prev[1]) * r.height) > 3) lasso.push(p);
+        this.drawShapes(s("polyline", { class: "preview", points: lasso.map(([u, v]) => `${u * 1000},${v * 1000}`).join(" ") }));
       }
     });
     const finish = (e: PointerEvent) => {
-      if (!start) return;
+      if (act === "none") return;
       const tool = this.host.tool(), p = this.rel(e), r = this.svg.getBoundingClientRect(), dur = this.duration();
-      if ((tool === "rect" || tool === "erase") && Math.abs(p[0] - start[0]) * r.width > 4 && Math.abs(p[1] - start[1]) * r.height > 4) {
-        const sh: Shape = { kind: "rect", mode: subtract ? "subtract" : "add", t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f: [yToFreq(Math.max(start[1], p[1])), yToFreq(Math.min(start[1], p[1]))] };
-        this.host.editShapes(this.i, (shapes) => { shapes.push(sh); });
-      } else if (tool === "lasso" && lasso.length >= 3) {
-        const px = simplify(lasso.map(([u, v]) => [u * r.width, v * r.height] as [number, number]), 1.5);
-        if (px.length >= 3) {
-          const sh: Shape = { kind: "poly", mode: subtract ? "subtract" : "add", points: px.map(([x, y]) => [x / r.width * dur, yToFreq(y / r.height)] as [number, number]) };
+      if (act === "draw") {
+        if (!dragged) this.host.setPicked(target >= 0 ? { layer: this.i, shape: target } : null);
+        else if ((tool === "rect" || tool === "erase") && Math.abs(p[0] - start[0]) * r.width > 4 && Math.abs(p[1] - start[1]) * r.height > 4) {
+          const sh: Shape = { kind: "rect", mode: subtract ? "subtract" : "add", t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f: [yToFreq(Math.max(start[1], p[1])), yToFreq(Math.min(start[1], p[1]))] };
+          this.host.setPicked(null);
           this.host.editShapes(this.i, (shapes) => { shapes.push(sh); });
+        } else if (tool === "lasso" && lasso.length >= 3) {
+          const px = simplify(lasso.map(([u, v]) => [u * r.width, v * r.height] as [number, number]), 1.5);
+          if (px.length >= 3) {
+            const sh: Shape = { kind: "poly", mode: subtract ? "subtract" : "add", points: px.map(([x, y]) => [x / r.width * dur, yToFreq(y / r.height)] as [number, number]) };
+            this.host.setPicked(null);
+            this.host.editShapes(this.i, (shapes) => { shapes.push(sh); });
+          }
         }
-      } else if (tool === "move" && moving >= 0) {
-        this.host.editShapes(this.i, () => { }, { undo: false, render: dragged });
-      }
-      start = null; lasso = []; moving = -1;
+      } else if (act === "move" && dragged) this.host.editShapes(this.i, () => { }, { undo: false, render: true });
+      act = "none"; lasso = [];
       this.drawShapes();
     };
     this.svg.addEventListener("pointerup", finish);
-    this.svg.addEventListener("pointercancel", () => { start = null; lasso = []; moving = -1; this.drawShapes(); });
+    this.svg.addEventListener("pointercancel", () => { act = "none"; lasso = []; this.drawShapes(); });
     this.svg.addEventListener("pointerleave", () => { this.cursor.textContent = ""; });
   }
 

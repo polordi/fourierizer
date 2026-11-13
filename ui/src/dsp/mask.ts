@@ -1,11 +1,14 @@
 // Resolution-independent selections (PLAN §4.3), identical to python/fourierizer_ref/mask.py.
 // Shapes live in the plane (t [s], φ = log₂ f). Distances are measured in a plane scaled by the
 // shape's feather, and the soft mask is the raised-cosine ramp ρ(d) = ½ + ½ sin(πd) on [−½, ½].
+// Optional time fades multiply it by E(t, φ) = max_j S((t − a_j)/fadeIn)·S((b_j − t)/fadeOut) over
+// the time intervals [a_j, b_j] the shape covers on the row φ.
 
 export type Mode = "add" | "subtract";
 
-export interface RectShape { kind: "rect"; mode: Mode; gain?: number; t: [number, number]; f: [number, number]; featherS?: number; featherOct?: number; }
-export interface PolyShape { kind: "poly"; mode: Mode; gain?: number; points: [number, number][]; featherS?: number; featherOct?: number; }
+interface ShapeBase { mode: Mode; gain?: number; featherS?: number; featherOct?: number; fadeIn?: number; fadeOut?: number; }
+export interface RectShape extends ShapeBase { kind: "rect"; t: [number, number]; f: [number, number]; }
+export interface PolyShape extends ShapeBase { kind: "poly"; points: [number, number][]; }
 export type Shape = RectShape | PolyShape;
 
 export const F_FLOOR = 1.0;
@@ -16,6 +19,43 @@ export function ramp(d: number): number {
   return 0.5 + 0.5 * Math.sin(Math.PI * d);
 }
 
+/** S(u): 0 → 1 raised cosine on [0, 1]. */
+export function fade(u: number): number {
+  return 0.5 - 0.5 * Math.cos(Math.PI * (u < 0 ? 0 : u > 1 ? 1 : u));
+}
+
+/** E on one row: max over the intervals [a, b, a, b, …] of fade-in × fade-out (0 if none). */
+export function envelope(t: number, iv: ArrayLike<number>, fadeIn: number, fadeOut: number): number {
+  let E = 0;
+  for (let j = 0; j + 1 < iv.length; j += 2) {
+    let e = 1;
+    if (fadeIn > 0) e *= fade((t - iv[j]) / fadeIn);
+    if (fadeOut > 0) e *= fade((iv[j + 1] - t) / fadeOut);
+    if (e > E) E = e;
+  }
+  return E;
+}
+
+/** Time intervals a polygon (t s, f Hz) covers on the row φ = log₂ f, as [a, b, a, b, …]. */
+export function polyRowIntervals(points: [number, number][], phi: number): number[] {
+  const ts = points.map((p) => p[0]), ps = points.map((p) => Math.log2(Math.max(p[1], F_FLOOR)));
+  const lo = Math.min(...ps), hi = Math.max(...ps), eps = 1e-9 * Math.max(1, hi - lo);
+  const y = Math.min(Math.max(phi, lo + eps), hi - eps);
+  const xs: number[] = [];
+  for (let i = 0; i < ts.length; i++) {
+    const j = i === 0 ? ts.length - 1 : i - 1;
+    const ax = ts[j], ay = ps[j], bx = ts[i], by = ps[i];
+    if ((ay > y) !== (by > y)) xs.push(ax + (y - ay) * (bx - ax) / (by - ay));
+  }
+  xs.sort((a, b) => a - b);
+  return xs.length % 2 ? xs.slice(0, -1) : xs;
+}
+
+/** Time intervals of any shape on the row φ (a rectangle covers [t0, t1] on every row). */
+export function rowIntervals(s: Shape, phi: number): number[] {
+  return s.kind === "rect" ? [s.t[0], s.t[1]] : polyRowIntervals(s.points, phi);
+}
+
 /** log₂ of each bin frequency, with the DC bin mapped to F_FLOOR (as in Python). */
 export function logFreqs(freqs: Float64Array): Float64Array {
   const P = new Float64Array(freqs.length);
@@ -24,9 +64,9 @@ export function logFreqs(freqs: Float64Array): Float64Array {
 }
 
 interface Compiled {
-  mode: Mode; gain: number; ft: number; fp: number;
+  mode: Mode; gain: number; ft: number; fp: number; fi: number; fo: number; fades: boolean;
   rect?: { t0: number; t1: number; p0: number; p1: number };
-  poly?: { vx: Float64Array; vy: Float64Array; minX: number; maxX: number; minY: number; maxY: number };
+  poly?: { vx: Float64Array; vy: Float64Array; minX: number; maxX: number; minY: number; maxY: number; points: [number, number][]; rows?: { P: Float64Array; iv: number[][] } };
 }
 
 /** Precompute a selection for fast row-by-row rasterization. */
@@ -35,7 +75,8 @@ export class SelectionRaster {
   constructor(shapes: Shape[], featherS = 0.01, featherOct = 1 / 12) {
     this.shapes = shapes.map((s) => {
       const ft = Math.max(s.featherS ?? featherS, 1e-9), fp = Math.max(s.featherOct ?? featherOct, 1e-9);
-      const c: Compiled = { mode: s.mode, gain: s.gain ?? 1, ft, fp };
+      const fi = Math.max(s.fadeIn ?? 0, 0), fo = Math.max(s.fadeOut ?? 0, 0);
+      const c: Compiled = { mode: s.mode, gain: s.gain ?? 1, ft, fp, fi, fo, fades: fi > 0 || fo > 0 };
       if (s.kind === "rect") {
         c.rect = {
           t0: s.t[0], t1: s.t[1],
@@ -46,7 +87,7 @@ export class SelectionRaster {
         if (s.points.length < 3) throw new Error("a polygon needs at least 3 points");
         const vx = new Float64Array(s.points.map((p) => p[0] / ft));
         const vy = new Float64Array(s.points.map((p) => Math.log2(Math.max(p[1], F_FLOOR)) / fp));
-        c.poly = { vx, vy, minX: Math.min(...vx), maxX: Math.max(...vx), minY: Math.min(...vy), maxY: Math.max(...vy) };
+        c.poly = { vx, vy, minX: Math.min(...vx), maxX: Math.max(...vx), minY: Math.min(...vy), maxY: Math.max(...vy), points: s.points };
       }
       return c;
     });
@@ -72,10 +113,12 @@ export class SelectionRaster {
     const r = s.rect!;
     const dt = Math.min(t - r.t0, r.t1 - t) / s.ft;
     if (dt <= -0.5) return; // fully outside in time: d ≤ dt ≤ −½ → M_s = 0 for every bin
+    const E = s.fades ? envelope(t, [r.t0, r.t1], s.fi, s.fo) : 1;
+    if (E === 0) return;
     for (let k = 0; k < P.length; k++) {
       const dp = Math.min(P[k] - r.p0, r.p1 - P[k]) / s.fp;
       const d = dt >= 0 && dp >= 0 ? Math.min(dt, dp) : -Math.hypot(Math.min(dt, 0), Math.min(dp, 0));
-      const ms = s.gain * ramp(d);
+      const ms = s.gain * ramp(d) * E;
       if (ms !== 0) this.combine(out, k, ms, s.mode); // M_s = 0 leaves M unchanged in both modes
     }
   }
@@ -83,6 +126,7 @@ export class SelectionRaster {
   private polyRow(s: Compiled, t: number, P: Float64Array, out: Float64Array): void {
     const p = s.poly!, X = t / s.ft, n = p.vx.length;
     if (X < p.minX - 0.5 || X > p.maxX + 0.5) return; // d < −½ for the whole row → M_s = 0
+    if (s.fades && p.rows?.P !== P) p.rows = { P, iv: Array.from(P, (phi) => polyRowIntervals(p.points, phi)) };
     for (let k = 0; k < P.length; k++) {
       const Y = P[k] / s.fp;
       if (Y < p.minY - 0.5 || Y > p.maxY + 0.5) continue;
@@ -99,7 +143,7 @@ export class SelectionRaster {
         if ((ay > Y) !== (p.vy[i] > Y) && X < ax + (Y - ay) * ex / ey) inside = !inside;
       }
       const d = Math.sqrt(d2);
-      const ms = s.gain * ramp(inside ? d : -d);
+      const ms = s.gain * ramp(inside ? d : -d) * (s.fades ? envelope(t, p.rows!.iv[k], s.fi, s.fo) : 1);
       if (ms !== 0) this.combine(out, k, ms, s.mode);
     }
   }

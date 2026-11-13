@@ -98,6 +98,33 @@ def test_polygon_matches_rect():
     assert np.mean(a != b) < 0.01  # only boundary samples may differ
 
 
+
+def test_fades_shape_time_inside_the_selection():
+    """E = S((t − t0)/fade_in)·S((t1 − t)/fade_out): 0 at the edges, ½ halfway, 1 past the fade."""
+    r = Rect(t=(1.0, 3.0), f=(100, 10000), feather_s=0, feather_oct=0, fade_in=0.4, fade_out=1.0)
+    M = Selection((r,)).rasterize(np.array([1.0, 1.2, 1.4, 2.0, 2.5, 3.0]), np.array([1000.0]))[:, 0]
+    assert M == pytest.approx([0.0, 0.5, 1.0, 1.0, 0.5, 0.0])
+
+
+def test_zero_fades_leave_the_mask_unchanged():
+    base = dict(points=((0.2, 200), (1.0, 3000), (1.6, 500), (0.9, 900)), feather_s=0.02, feather_oct=1 / 12)
+    times, freqs = np.linspace(0, 2, 61), np.geomspace(50, 10000, 53)
+    a = Selection((Polygon(**base),)).rasterize(times, freqs)
+    b = Selection((Polygon(**base, fade_in=0.0, fade_out=0.0),)).rasterize(times, freqs)
+    assert np.array_equal(a, b)
+
+
+def test_polygon_fades_follow_each_row():
+    """On a triangle, each frequency row fades out toward its own right edge."""
+    tri = Polygon(points=((0.0, 100), (2.0, 100), (0.0, 1600)), feather_s=1e-6, feather_oct=1e-6, fade_out=0.5)
+    # row at 400 Hz (half way up in log f): covers t ∈ [0, 1]; the fade ends at t = 1
+    phi = np.log2(400.0)
+    (a, b), = tri.row_intervals(phi)
+    assert a == pytest.approx(0.0) and b == pytest.approx(1.0)
+    M = Selection((tri,)).rasterize(np.array([0.5, 0.75, 0.999]), np.array([400.0]))[:, 0]
+    assert M[0] == pytest.approx(1.0) and M[1] == pytest.approx(0.5) and M[2] < 1e-4
+
+
 # ---- rendering -------------------------------------------------------------------------
 def test_full_selection_reproduces_input():
     x = rng.standard_normal((2, 20000))

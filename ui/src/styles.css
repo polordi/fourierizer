@@ -124,7 +124,14 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .sel.picked { stroke-dasharray: none; stroke-width: 2.5; fill-opacity: .28; }
 .sel.sub.picked { fill-opacity: .9; }
 .preview { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
-.hd { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; background: var(--layer-deep); border: 1.5px solid var(--ink); cursor: move; touch-action: none; }
+.hd { position: absolute; width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; background: var(--display); border: 1.5px solid var(--ink); cursor: move; touch-action: none; pointer-events: auto; z-index: 2; }
+.hd:hover { background: var(--layer); }
+.hd.rd { border-radius: 50%; }
+.bbox { fill: none; stroke: var(--ink); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.sel.picked, .tool-move .sel { cursor: move; }
+.shapebar { position: absolute; z-index: 3; display: flex; align-items: center; gap: 12px; padding: 5px 6px 5px 8px; background: var(--panel); border: 1.5px solid var(--ink); border-radius: var(--radius-sm); box-shadow: 0 2px 0 var(--ink); pointer-events: auto; white-space: nowrap; animation: fz-pop 160ms ease-out both; }
+.shapebar .vseam { width: 1px; align-self: stretch; background: var(--seam); }
+@keyframes fz-pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .cursor-ro { position: absolute; top: 6px; right: 6px; padding: 1px 4px; background: var(--display); border: 1px solid var(--ink); pointer-events: none; }
 .empty-hint { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 8px; pointer-events: none; }
 .tool-rect svg.ov, .tool-lasso svg.ov, .tool-erase svg.ov { cursor: crosshair; }
@@ -155,7 +162,7 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .edit-only { gap: 8px; }
 .mode-rail .full, .mode-rail .screw, .lm:not(.mode-editor) .edit-only { display: none; }
 .cursor-ro:empty { display: none; }
-.lm:not(.mode-editor) .xax, .lm:not(.mode-editor) .params, .lm:not(.mode-editor) .cursor-ro, .lm:not(.mode-editor) .hd { display: none; }
+.lm:not(.mode-editor) .xax, .lm:not(.mode-editor) .params, .lm:not(.mode-editor) .cursor-ro, .mode-rail .hd, .mode-rail .shapebar { display: none; }
 .lm:not(.mode-grid) .chips { display: none; }
 .mode-editor .params, .mode-grid .chips, .mode-editor .xax { animation: fz-in 320ms ease-out 300ms both; }
 #layers.instant .params, #layers.instant .chips, #layers.instant .xax { animation: none; }
@@ -176,7 +183,10 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .playhead { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--ink); left: 0; display: none; pointer-events: none; }
 .rx { position: relative; height: 12px; }
 .leds { display: flex; gap: 8px; align-items: center; }
-.slotpick { display: flex; gap: 6px; }
+.result .go-col { position: relative; }
+.go-col .key.sm { width: 100%; }
+.slotpick { position: absolute; z-index: 5; left: calc(100% + 8px); bottom: 0; display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border: 1.5px solid var(--ink); border-radius: var(--radius-sm); box-shadow: 0 2px 0 var(--ink); white-space: nowrap; animation: fz-pop 160ms ease-out both; }
+.slotpick .key.sm { width: auto; }
 .slotpick .key { min-width: 30px; padding: 0 6px; }
 .slotpick .key .swatch { width: 12px; height: 12px; }
 .sampler { width: 420px; flex: none; display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; }

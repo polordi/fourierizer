@@ -57,6 +57,12 @@ export function featherLabel(v: number): string {
   return st < 0.995 ? `${st.toFixed(2)} st` : `${st.toFixed(1)} st`;
 }
 
+/** Fade knob (0..1) ↔ seconds: quadratic, so short fades get most of the travel; 0.5 → 1 s, 1 → 4 s. */
+export const FADE_MAX_S = 4;
+export function knobToFade(v: number): number { return Math.round(FADE_MAX_S * v * v * 1000) / 1000; }
+export function fadeToKnob(s: number): number { return Math.sqrt(Math.max(0, s) / FADE_MAX_S); }
+export function fadeLabel(s: number): string { return s <= 0 ? "Off" : s < 1 ? `${Math.round(s * 1000)} ms` : `${s.toFixed(2)} s`; }
+
 export function pitchedSeconds(l: LayerState): number {
   return Math.ceil(l.samples / 2 ** (l.pitch / 12)) / SR;
 }

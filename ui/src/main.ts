@@ -250,10 +250,10 @@ class App implements LayerHost {
       }),
     ], () => String(st.focus), (id) => this.focus(+id), "");
     const toolSeg = new Segmented(null, ([
-      ["rect", "Rect", ICONS.rect, "Drag a rectangle to select (Alt subtracts)"],
-      ["lasso", "Lasso", ICONS.lasso, "Draw a free shape to select (Alt subtracts)"],
+      ["rect", "Rect", ICONS.rect, "Drag a rectangle to select (Alt subtracts). Click a selection to move, resize, fade or delete it"],
+      ["lasso", "Lasso", ICONS.lasso, "Draw a free shape to select (Alt subtracts). Click a selection to move, scale, fade or delete it"],
       ["erase", "Erase", ICONS.erase, "Drag a rectangle to remove from the selection"],
-      ["move", "Move", ICONS.move, "Pick a selection to move it; in the focus view drag its handles; Delete removes it"],
+      ["move", "Move", ICONS.move, "Only pick and move selections, never draw. Delete removes the picked one"],
     ] as const).map(([id, label, ic, title]) => ({ id, label, icon: icon(ic), cls: "row", title })),
     () => st.tool, (id) => { st.tool = id as Tool; this.views.forEach((v) => { v.el.className = v.el.className.replace(/\btool-\w+/g, ""); v.el.classList.add(`tool-${id}`); v.drawShapes(); }); });
     this.refreshers.push(viewSeg, toolSeg);
@@ -275,7 +275,7 @@ class App implements LayerHost {
     this.statusEl = h("span", { class: "ro-sm", "aria-live": "polite" }, "Starting…");
     this.leds = [1, 2, 3, 4].map((n) => h("span", { class: `led fz-l${n}`, "data-on": "false" }));
     const go = key("Fourierize", ICONS.wave, { class: "go", title: "Render the result now" }, () => { this.ensureAudio(); void this.renderNow(); });
-    this.autoKey = key("Auto", null, { class: "sm", "aria-pressed": String(st.auto), title: "Re-render automatically after every change" }, () => {
+    this.autoKey = key("Auto-render", null, { class: "sm", "aria-pressed": String(st.auto), title: "Re-render automatically after every change" }, () => {
       st.auto = !st.auto; this.autoKey.setAttribute("aria-pressed", String(st.auto)); if (st.auto) this.scheduleRender(true);
     });
     this.slotPick = h("div", { class: "slotpick", hidden: true });
@@ -284,12 +284,13 @@ class App implements LayerHost {
       b.prepend(h("span", { class: "swatch", "aria-hidden": "true" }));
       return b;
     }));
-    const slotKey = key("→ Slot", null, { class: "sm", title: "Use the result as a source (iteration)" }, () => {
+    this.slotPick.prepend(h("span", { class: "silk sm" }, "Replace layer"));
+    const slotKey = key("Send to layer", null, { class: "sm", title: "Use the result as a source: it replaces one of the four layers, so you can select from it again (iteration)" }, () => {
       if (!this.result) { this.toast("Render something first"); return; }
       this.slotPick.hidden = !this.slotPick.hidden;
     });
     const goCol = h("div", { class: "go-col" }, go, h("div", { class: "leds" }, ...this.leds), this.statusEl,
-      h("div", { style: "display:flex;gap:8px" }, this.autoKey, slotKey), this.slotPick);
+      this.autoKey, slotKey, this.slotPick);
 
     const opSeg = new Segmented(null, OPS.map((o) => ({ id: o.id, label: o.label, title: o.hint })), () => st.op, (id) => {
       st.op = id as Op; this.syncOp(); this.scheduleRender(true);

@@ -26,7 +26,8 @@ def arr(x: np.ndarray) -> list:
 
 
 def shape_json(s) -> dict:
-    base = {"mode": s.mode, "gain": s.gain, "featherS": s.feather_s, "featherOct": s.feather_oct}
+    base = {"mode": s.mode, "gain": s.gain, "featherS": s.feather_s, "featherOct": s.feather_oct,
+            "fadeIn": s.fade_in, "fadeOut": s.fade_out}
     if isinstance(s, Rect):
         return {"kind": "rect", "t": list(s.t), "f": list(s.f), **base}
     return {"kind": "poly", "points": [list(p) for p in s.points], **base}
@@ -83,6 +84,20 @@ def main() -> None:
         "y": [arr(c) for c in mixed],
     }
     (OUT / "render.json").write_text(json.dumps(render_doc))
+
+    # Masks with time fades: a rectangle, a concave lasso and a faded eraser.
+    fades = Selection((
+        Rect(t=(0.1, 1.2), f=(80, 2000), feather_s=0.01, feather_oct=1 / 12, fade_in=0.15, fade_out=0.6),
+        Polygon(points=((0.3, 300), (1.5, 400), (1.0, 900), (1.6, 3000), (0.5, 2500), (0.8, 1000)),
+                feather_s=0.02, feather_oct=1 / 8, fade_in=0.0, fade_out=0.4),
+        Rect(t=(0.6, 0.9), f=(500, 1500), mode="subtract", gain=0.9, feather_s=0.005, feather_oct=1 / 24,
+             fade_in=0.1, fade_out=0.1),
+    ))
+    times = np.linspace(-0.1, 1.8, 77)
+    freqs = np.concatenate([[0.0], np.geomspace(40, 6000, 90)])
+    mask_doc = {"shapes": [shape_json(s) for s in fades.shapes], "times": arr(times), "freqs": arr(freqs),
+                "M": arr(fades.rasterize(times, freqs))}
+    (OUT / "masks.json").write_text(json.dumps(mask_doc))
     print("golden files written to", OUT)
 
 

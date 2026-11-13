@@ -107,7 +107,7 @@ Plan: el hito H7 implementa (1), que encaja directo en nuestra arquitectura por 
 
 ### 3.5 Iteraciones (síntesis recursiva)
 
-Cada render produce audio, y el audio puede ser fuente. Un botón **"→ Slot"** manda el resultado a un slot. El proyecto guarda un **historial**: un grafo dirigido acíclico de renders, para saber de dónde salió cada sonido y poder rehacerlo. Matemáticamente es composición: y⁽²⁾ = F(y⁽¹⁾, x₅, x₆, x₇).
+Cada render produce audio, y el audio puede ser fuente. Un botón **"Send to layer"** manda el resultado a uno de los cuatro slots. El proyecto guarda un **historial**: un grafo dirigido acíclico de renders, para saber de dónde salió cada sonido y poder rehacerlo. Matemáticamente es composición: y⁽²⁾ = F(y⁽¹⁾, x₅, x₆, x₇).
 
 ### 3.6 Cómo vas a dar feedback de diseño (respuesta a la pregunta 19)
 
@@ -178,6 +178,12 @@ Para el objeto s, su máscara es
   M_s(t,φ) = a_s · σ( d_s(t,φ) / δ_s ),
 
 donde d_s es la distancia con signo al borde (positiva adentro) y σ es una rampa suave (p. ej. una sigmoide de tipo coseno). Las máscaras se combinan en orden de capas, como en un editor de imagen: M ← M + (1−M)·M_s para añadir y M ← M·(1−M_s) para restar. Al final se **muestrea en la malla de la capa**: Mᵢ(m,k) = M(t_m, log₂ f_k).
+
+**Desvanecidos en el tiempo (ronda de feedback H3).** Cada objeto puede llevar además un *fade in* y un *fade out* en segundos, **dentro** de la selección. En el renglón φ, el objeto cubre intervalos de tiempo [a_j(φ), b_j(φ)] (en un rectángulo, [t₀, t₁] en todos los renglones), y la máscara se multiplica por
+
+  E(t,φ) = max_j S((t − a_j)/τ_in) · S((b_j − t)/τ_out),  S(u) = ½ − ½cos(πu) en [0,1],
+
+así que cada frecuencia se desvanece hacia su propio borde (en un lazo, la punta de un triángulo se apaga antes que su base). Un fade de 0 aporta un factor 1, de modo que sin fades la máscara no cambia.
 
 **Consecuencias.** Puedes cambiar N, H o la ventana sin perder tu selección. Las máscaras suaves reducen el ringing y el *musical noise* que producen los bordes duros (el documento teórico explicará por qué con el operador de proyección de la ISTFT).
 

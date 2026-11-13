@@ -9,8 +9,19 @@ Its soft mask is a raised-cosine ramp centered on the boundary:
 
     M_s = a_s · ρ(d_s),   ρ(d) = 0 if d ≤ -½,  1 if d ≥ ½,  ½ + ½·sin(π d) otherwise.
 
-With feather → 0 the ramp becomes a hard (binary) edge. Shapes combine in order, like layers
-in an image editor:
+With feather → 0 the ramp becomes a hard (binary) edge.
+
+Optional time fades (seconds) shape the sound *inside* each selection, per frequency row. On the
+row φ the selection covers intervals [a_j(φ), b_j(φ)] (for a rectangle, [t0, t1] on every row), and
+
+    E(t, φ) = max_j  S((t − a_j) / fade_in) · S((b_j − t) / fade_out),
+    S(u) = 0 if u ≤ 0,  1 if u ≥ 1,  ½ − ½·cos(π u) otherwise,
+
+where a zero fade contributes a factor 1. The shape's mask becomes M_s = a_s · ρ(d_s) · E. Rows
+outside a polygon's frequency range use the nearest covered row, so the frequency feather stays
+continuous across the top and bottom edges.
+
+Shapes combine in order, like layers in an image editor:
 
     add:       M ← M + (1 − M) · M_s
     subtract:  M ← M · (1 − M_s)
@@ -30,18 +41,53 @@ def _ramp(d: np.ndarray) -> np.ndarray:
     return np.where(d <= -0.5, 0.0, np.where(d >= 0.5, 1.0, 0.5 + 0.5 * np.sin(np.pi * np.clip(d, -0.5, 0.5))))
 
 
+def _fade(u: np.ndarray) -> np.ndarray:
+    """S(u): 0 → 1 raised cosine on [0, 1]."""
+    return 0.5 - 0.5 * np.cos(np.pi * np.clip(u, 0.0, 1.0))
+
+
+def _envelope(T: np.ndarray, intervals: list[tuple[float, float]], fade_in: float, fade_out: float) -> np.ndarray:
+    """E for one row: max over intervals of fade-in × fade-out (0 when the row has no interval)."""
+    E = np.zeros(T.shape)
+    for a, b in intervals:
+        e = np.ones(T.shape)
+        if fade_in > 0:
+            e = e * _fade((T - a) / fade_in)
+        if fade_out > 0:
+            e = e * _fade((b - T) / fade_out)
+        E = np.maximum(E, e)
+    return E
+
+
 @dataclass(frozen=True)
 class _Shape:
     mode: Literal["add", "subtract"] = "add"
     gain: float = 1.0
     feather_s: float = 0.01      # time feather, seconds
     feather_oct: float = 1 / 12  # frequency feather, octaves (1/12 = one semitone)
+    fade_in: float = 0.0         # seconds, inside the selection
+    fade_out: float = 0.0
 
     def signed_distance(self, T: np.ndarray, P: np.ndarray) -> np.ndarray:  # pragma: no cover
         raise NotImplementedError
 
+    def row_intervals(self, phi: float) -> list[tuple[float, float]]:  # pragma: no cover
+        raise NotImplementedError
+
+    def envelope(self, T: np.ndarray, P: np.ndarray) -> np.ndarray:
+        fi, fo = max(self.fade_in, 0.0), max(self.fade_out, 0.0)
+        if fi == 0 and fo == 0:
+            return np.ones(T.shape)
+        E = np.zeros(T.shape)
+        values, inverse = np.unique(P, return_inverse=True)
+        inverse = inverse.reshape(P.shape)
+        for j, phi in enumerate(values):
+            on = inverse == j
+            E[on] = _envelope(T[on], self.row_intervals(float(phi)), fi, fo)
+        return E
+
     def soft(self, T: np.ndarray, P: np.ndarray) -> np.ndarray:
-        return self.gain * _ramp(self.signed_distance(T, P))
+        return self.gain * _ramp(self.signed_distance(T, P)) * self.envelope(T, P)
 
 
 @dataclass(frozen=True)
@@ -64,6 +110,9 @@ class Rect(_Shape):
         inside = np.minimum(dt, dp)
         outside = -np.hypot(np.minimum(dt, 0), np.minimum(dp, 0))
         return np.where((dt >= 0) & (dp >= 0), inside, outside)
+
+    def row_intervals(self, phi):
+        return [(self.t[0], self.t[1])]
 
 
 @dataclass(frozen=True)
@@ -95,6 +144,21 @@ class Polygon(_Shape):
             inside ^= straddles & (X < x_cross)
         d = np.sqrt(d2)
         return np.where(inside, d, -d)
+
+    def row_intervals(self, phi):
+        """Time intervals the polygon covers on the row log₂ f = phi (even-odd rule)."""
+        ts = [p[0] for p in self.points]
+        ps = [float(np.log2(max(p[1], F_FLOOR))) for p in self.points]
+        lo, hi = min(ps), max(ps)
+        eps = 1e-9 * max(1.0, hi - lo)
+        y = min(max(phi, lo + eps), hi - eps)
+        xs = []
+        for i in range(len(ts)):
+            ax, ay, bx, by = ts[i - 1], ps[i - 1], ts[i], ps[i]
+            if (ay > y) != (by > y):
+                xs.append(ax + (y - ay) * (bx - ax) / (by - ay))
+        xs.sort()
+        return [(xs[k], xs[k + 1]) for k in range(0, len(xs) - 1, 2)]
 
 
 @dataclass(frozen=True)

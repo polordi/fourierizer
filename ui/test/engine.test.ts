@@ -11,7 +11,7 @@ import { synthesizeLayer, render } from "../src/dsp/render.ts";
 import { renderOp } from "../src/dsp/ops.ts";
 import { tapePitch } from "../src/dsp/resample.ts";
 import { spectrogramImage } from "../src/dsp/spectrogram.ts";
-import type { Shape } from "../src/dsp/mask.ts";
+import { SelectionRaster, logFreqs, type Shape } from "../src/dsp/mask.ts";
 import type { Grid } from "../src/dsp/stft.ts";
 
 const GOLDEN = fileURLToPath(new URL("../../python/golden/data/", import.meta.url));
@@ -49,7 +49,16 @@ test("masked resynthesis matches Layer.synthesize on five grids", () => {
   }
 });
 
-test("render (gain, offset, mono→stereo, normalization) matches", () => {
+test("selection masks with time fades match Selection.rasterize", () => {
+  const g = load("masks.json");
+  const raster = new SelectionRaster(g.shapes as Shape[]);
+  const P = logFreqs(new Float64Array(g.freqs)), row = new Float64Array(P.length);
+  let worst = 0;
+  g.times.forEach((t: number, m: number) => { raster.row(t, P, row); worst = Math.max(worst, maxAbsDiff(row, g.M[m])); });
+  assert.ok(worst < 1e-9, `max diff ${worst}`);
+});
+
+test("render (gain, offset, monoâ†’stereo, normalization) matches", () => {
   const g = load("render.json");
   const y = render(g.layers.map((l: { x: number[][]; grid: Grid; shapes: Shape[]; gainDb: number; offsetS: number }) => ({
     channels: l.x, grid: l.grid, shapes: l.shapes, gainDb: l.gainDb, offsetS: l.offsetS,
