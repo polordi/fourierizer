@@ -2,6 +2,7 @@
 // Each reads its value through get() and writes through set(), and refresh() repaints it.
 
 import { h, icon, s } from "./dom.ts";
+import { HOW, tip } from "./help.ts";
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -25,6 +26,7 @@ export interface KnobOpts {
   format: (v: number) => string;
   reset: number;
   aria?: string;
+  tip?: string;                 // what the control does (tooltip)
 }
 
 export class Knob {
@@ -46,6 +48,7 @@ export class Knob {
     this.dial = h("div", { class: "dial focusable", tabindex: 0, role: "slider", "aria-label": o.aria ?? o.label, "aria-valuemin": 0, "aria-valuemax": 1 }, svg, this.cap);
     this.out = h("span", { class: "ro" });
     this.el = h("div", { class: `knob ${layerClass}` }, this.dial, this.out, h("span", { class: "silk" }, o.label));
+    if (o.tip) this.el.dataset.tip = tip(o.tip, HOW.knob);
     dragVertical(this.dial, o.get, (v) => { o.set(v); this.refresh(false); });
     this.dial.addEventListener("dblclick", () => { o.set(o.reset); this.refresh(true); });
     this.dial.addEventListener("keydown", (e) => {
@@ -78,6 +81,7 @@ export class MiniKnob {
     this.mk = h("span", { class: "mk focusable", tabindex: 0, role: "slider", "aria-label": o.aria ?? o.label }, this.ind);
     this.out = h("span", { class: "ro-sm ink" });
     this.el = h("span", { class: "mini" }, this.mk, h("span", { class: "lbl" }, h("span", { class: "silk sm" }, o.label), this.out));
+    if (o.tip) this.el.dataset.tip = tip(o.tip, HOW.knob);
     dragVertical(this.mk, o.get, (v) => { o.set(v); this.refresh(); });
     this.mk.addEventListener("dblclick", () => { o.set(o.reset); this.refresh(true); });
     this.mk.addEventListener("keydown", (e) => {
@@ -102,6 +106,7 @@ export interface StepperOpts {
   step: (dir: 1 | -1, fine: boolean) => void;
   canStep?: (dir: 1 | -1) => boolean;
   dragPx?: number;
+  tip?: string;
 }
 
 export class Stepper {
@@ -115,9 +120,10 @@ export class Stepper {
     this.o = o;
     this.dec = h("button", { class: "btn", type: "button", "aria-label": `Decrease ${o.label}` }, "−");
     this.inc = h("button", { class: "btn", type: "button", "aria-label": `Increase ${o.label}` }, "+");
-    this.val = h("div", { class: "val ro-lg", "aria-live": "polite", title: "Drag up or down, or scroll" });
+    this.val = h("div", { class: "val ro-lg", "aria-live": "polite" });
     this.der = h("span", { class: "ro-sm" });
     this.el = h("div", { class: "stepper" }, h("span", { class: "silk" }, o.label), h("div", { class: "body" }, this.dec, this.val, this.inc), this.der);
+    this.el.dataset.tip = tip(o.tip ?? o.label, HOW.stepper);
     this.dec.addEventListener("click", (e) => { o.step(-1, e.shiftKey); this.refresh(); });
     this.inc.addEventListener("click", (e) => { o.step(1, e.shiftKey); this.refresh(); });
     let y0 = 0, acc = 0;
@@ -172,13 +178,14 @@ export class Fader {
   private out: HTMLElement;
   private slot: HTMLElement;
   private get: () => number;
-  constructor(label: string, layerClass: string, get: () => number, set: (db: number) => void) {
+  constructor(label: string, layerClass: string, get: () => number, set: (db: number) => void, help?: string) {
     this.get = get;
     this.fill = h("div", { class: "fill" });
     this.cap = h("div", { class: "fcap" });
     this.out = h("span", { class: "ro", style: "font-size:12px" });
     this.slot = h("div", { class: "slot focusable", tabindex: 0, role: "slider", "aria-label": `${label} level` }, h("div", { class: "track" }, this.fill), this.cap);
     this.el = h("div", { class: `fader ${layerClass}` }, this.out, this.slot, h("span", { class: "silk" }, label));
+    if (help) this.el.dataset.tip = tip(help, HOW.fader);
     const H = 150, C = 16;
     const move = (e: PointerEvent) => {
       const r = this.slot.getBoundingClientRect();

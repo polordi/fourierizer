@@ -2,6 +2,8 @@
 // through `Host` (browser worker now, JUCE bridge in the plugin).
 
 import { BrowserHost, type Host } from "./host.ts";
+import { HELP } from "./view/help.ts";
+import { installTooltips } from "./view/tooltip.ts";
 import { Sampler } from "./audio/sampler.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
@@ -325,14 +327,15 @@ class App implements LayerHost {
 
     // sampler module
     const keytrack = new Segmented("Keytrack", [
-      { id: "tape", label: "Tape", title: "Pitch by playback speed: higher notes are shorter" },
-      { id: "spectral", label: "Spectral", disabled: true, title: "Pitch without changing length — arrives in milestone H6" },
+      { id: "tape", label: "Tape", title: HELP.tape },
+      { id: "spectral", label: "Spectral", disabled: true, title: HELP.spectral },
     ], () => st.keytrack, (id) => { st.keytrack = id as "tape"; });
+    keytrack.el.dataset.tip = HELP.keytrack;
     const rootStep = new Stepper({
       label: "Root", display: () => noteName(st.root), derived: () => `MIDI ${st.root} · ${(440 * 2 ** ((st.root - 69) / 12)).toFixed(1)} Hz`,
       canStep: (d) => d > 0 ? st.root < 127 : st.root > 0,
       step: (d, fine) => { st.root = Math.max(0, Math.min(127, st.root + d * (fine ? 12 : 1))); this.sampler.root = st.root; },
-      dragPx: 10,
+      dragPx: 10, tip: HELP.root,
     });
     this.keysEl = h("span", { class: "ro-sm keys" });
     this.midiKey = key("MIDI", ICONS.midi, { class: "sm", title: "Play from a MIDI keyboard (if the browser allows it)" }, () => void this.enableMidi());
@@ -340,7 +343,7 @@ class App implements LayerHost {
     const env = () => { const a = st.adsr; this.sampler.env = { a: adsrMap.a(a.a), d: adsrMap.d(a.d), s: adsrMap.s(a.s), r: adsrMap.r(a.r) }; };
     env();
     const knob = (k: "a" | "d" | "s" | "r", label: string, fmt: (v: number) => string, reset: number) =>
-      new Knob({ label, aria: { a: "Attack", d: "Decay", s: "Sustain", r: "Release" }[k], get: () => st.adsr[k], set: (v) => { st.adsr[k] = v; env(); }, format: fmt, reset });
+      new Knob({ label, aria: { a: "Attack", d: "Decay", s: "Sustain", r: "Release" }[k], tip: { a: HELP.attack, d: HELP.decay, s: HELP.sustain, r: HELP.release }[k], get: () => st.adsr[k], set: (v) => { st.adsr[k] = v; env(); }, format: fmt, reset });
     const kA = knob("a", "Atk", (v) => fmtMs(adsrMap.a(v)), 0.18), kD = knob("d", "Dec", (v) => fmtMs(adsrMap.d(v)), 0.33);
     const kS = knob("s", "Sus", (v) => v < 0.005 ? "−∞ dB" : `${(20 * Math.log10(v)).toFixed(1).replace("-", "−")} dB`, 0.7);
     const kR = knob("r", "Rel", (v) => fmtMs(adsrMap.r(v)), 0.4);
@@ -350,7 +353,7 @@ class App implements LayerHost {
       h("div", { class: "knobs" }, kA.el, kD.el, kS.el, kR.el));
 
     // mix
-    const faders = [0, 1, 2, 3].map((i) => new Fader(`L${i + 1}`, `fz-l${i + 1}`, () => st.layers[i].levelDb, (db) => { st.layers[i].levelDb = db; this.scheduleRender(); }));
+    const faders = [0, 1, 2, 3].map((i) => new Fader(`L${i + 1}`, `fz-l${i + 1}`, () => st.layers[i].levelDb, (db) => { st.layers[i].levelDb = db; this.scheduleRender(); }, HELP.level));
     const mixMod = h("section", { class: "module mix", "aria-label": "Layer levels" }, ...screws(), ...faders.map((f) => f.el));
 
     root.append(header, this.layersEl, h("footer", { class: "bottom" }, resultMod, samplerMod, mixMod));
@@ -477,6 +480,7 @@ function fit(app: HTMLElement): void {
   app.style.height = z < 1 ? `${Math.max(minH, window.innerHeight / z)}px` : "";
 }
 
+installTooltips();
 const root = document.getElementById("app")!;
 const app = new App();
 fit(root);

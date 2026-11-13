@@ -3,6 +3,7 @@
 
 import { h, icon, s, ICONS, screws } from "./dom.ts";
 import { Knob, MiniKnob, Segmented, Stepper, key } from "./controls.ts";
+import { HELP, HOW, tip } from "./help.ts";
 import { freqToY, yToFreq, F_MIN, F_MAX } from "../dsp/spectrogram.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
 import { F_FLOOR, envelope, rowIntervals, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
@@ -118,8 +119,8 @@ export class LayerView {
     this.nameEl = h("span", { class: "lname" });
     this.metaEl = h("span", { class: "ro-sm full", style: "white-space:nowrap" });
     this.led = h("span", { class: "led full", title: "Loaded" });
-    this.muteB = key("M", null, { class: "sm", "aria-label": `Mute layer ${n}`, "aria-pressed": "false" }, () => host.toggleMute(i));
-    this.soloB = key("S", null, { class: "sm", "aria-label": `Solo layer ${n}`, "aria-pressed": "false" }, () => host.toggleSolo(i));
+    this.muteB = key("M", null, { class: "sm", "aria-label": `Mute layer ${n}`, "aria-pressed": "false", title: HELP.mute }, () => host.toggleMute(i));
+    this.soloB = key("S", null, { class: "sm", "aria-label": `Solo layer ${n}`, "aria-pressed": "false", title: HELP.solo }, () => host.toggleSolo(i));
     this.focusB = key(null, ICONS.focus, { class: "sm", "aria-label": `Focus layer ${n}`, title: `Focus layer ${n}` }, () => host.focus(this.mode === "editor" ? 0 : n));
     this.fileInput = h("input", { type: "file", accept: "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg,.m4a", hidden: true, "aria-label": `Audio file for layer ${n}` });
     this.fileInput.addEventListener("change", () => { const f = this.fileInput.files?.[0]; if (f) host.load(i, f); this.fileInput.value = ""; });
@@ -148,51 +149,52 @@ export class LayerView {
     const body = h("div", { class: "lbody" }, yax, this.display, this.xax);
 
     // grid-mode chips (click → focus)
-    const chip = (k: string, label: string) => {
+    const chip = (k: string, label: string, help: string) => {
       const v = h("span", { class: "ro" });
       this.chipEls[k] = v;
-      const c = h("button", { class: "chip", type: "button", title: "Edit in the focus view" }, h("span", { class: "silk sm" }, label), v);
+      const c = h("button", { class: "chip", type: "button", "data-tip": tip(help, HOW.chip) }, h("span", { class: "silk sm" }, label), v);
       c.addEventListener("click", () => host.focus(n));
       return c;
     };
     const fthrMini = new MiniKnob({
-      label: "Fthr", aria: `Layer ${n} feather`, get: () => L().feather, reset: 0.537, format: featherLabel,
+      label: "Fthr", aria: `Layer ${n} feather`, get: () => L().feather, reset: 0.537, format: featherLabel, tip: HELP.feather,
       set: (v) => { L().feather = v; host.paramsChanged(i, { render: true }); this.refreshParams(); },
     });
-    const chips = h("div", { class: "chips" }, chip("win", "Win"), chip("n", "N"), chip("h", "H"), chip("ofs", "Ofs"), chip("pitch", "Pitch"), h("span", { class: "grow" }), fthrMini.el);
+    const chips = h("div", { class: "chips" }, chip("win", "Win", HELP.window), chip("n", "N", HELP.fftSize), chip("h", "H", HELP.hop), chip("ofs", "Ofs", HELP.offset), chip("pitch", "Pitch", HELP.pitch), h("span", { class: "grow" }), fthrMini.el);
 
     // editor-mode parameters
-    const winSeg = new Segmented("Window", WINDOW_NAMES.map((w) => ({ id: w, label: WINDOW_LABELS[w], icon: windowIcon(w) })), () => L().window,
+    const winSeg = new Segmented("Window", WINDOW_NAMES.map((w) => ({ id: w, label: WINDOW_LABELS[w], icon: windowIcon(w), title: HELP.windows[w] })), () => L().window,
       (id) => { L().window = id as WindowName; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); }, "win");
     const nStep = new Stepper({
       label: "FFT size N", display: () => String(L().N),
       derived: () => `${(L().N / SR * 1000).toFixed(1)} ms · Δf ${(SR / L().N).toFixed(1)} Hz`,
       canStep: (d) => d > 0 ? L().N < 16384 : L().N > 256,
       step: (d) => { const l = L(); const nv = d > 0 ? Math.min(16384, l.N * 2) : Math.max(256, l.N / 2); if (nv !== l.N) { l.N = nv; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); } },
-      dragPx: 24,
+      dragPx: 24, tip: HELP.fftSize,
     });
+    winSeg.el.dataset.tip = HELP.window;
     const hStep = new Stepper({
       label: "Hop H", display: () => String(L().N / L().hopDiv),
       derived: () => `${(L().N / L().hopDiv / SR * 1000).toFixed(1)} ms · ${Math.round(100 - 100 / L().hopDiv)}% overlap`,
       canStep: (d) => d > 0 ? L().hopDiv > 2 : L().hopDiv < 16,
       step: (d) => { const l = L(); const nv = d > 0 ? Math.max(2, l.hopDiv / 2) : Math.min(16, l.hopDiv * 2); if (nv !== l.hopDiv) { l.hopDiv = nv; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); } },
-      dragPx: 24,
+      dragPx: 24, tip: HELP.hop,
     });
     const ofsStep = new Stepper({
       label: "Offset", display: () => `${L().offset >= 0 ? "+" : "−"}${Math.abs(L().offset).toFixed(2)}`,
       derived: () => `s · ${(L().offset / 0.48).toFixed(2).replace("-", "−")} beat @ 125`,
       step: (d, fine) => { const l = L(); l.offset = Math.round((Math.min(10, Math.max(-10, l.offset + d * (fine ? 0.001 : 0.01)))) * 1000) / 1000; host.paramsChanged(i, { render: true }); this.refreshParams(); },
-      dragPx: 4,
+      dragPx: 4, tip: HELP.offset,
     });
     const pitchStep = new Stepper({
       label: "Pitch", display: () => `${L().pitch > 0 ? "+" : L().pitch < 0 ? "−" : ""}${Math.abs(L().pitch)} st`,
       derived: () => `Tape · ×${(2 ** (L().pitch / 12)).toFixed(3)}`,
       canStep: (d) => d > 0 ? L().pitch < 24 : L().pitch > -24,
       step: (d) => { const l = L(); l.pitch = Math.max(-24, Math.min(24, l.pitch + d)); host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); },
-      dragPx: 14,
+      dragPx: 14, tip: HELP.pitch,
     });
     const fthrKnob = new Knob({
-      label: "Fthr", aria: `Layer ${n} feather`, get: () => L().feather, reset: 0.537, format: featherLabel,
+      label: "Fthr", aria: `Layer ${n} feather`, get: () => L().feather, reset: 0.537, format: featherLabel, tip: HELP.feather,
       set: (v) => { L().feather = v; host.paramsChanged(i, { render: true }); fthrMini.refresh(); },
     }, `fz-l${n}`);
     const params = h("div", { class: "params" }, winSeg.el, nStep.el, hStep.el, ofsStep.el, pitchStep.el, h("span", { class: "grow" }), fthrKnob.el);
@@ -429,7 +431,7 @@ export class LayerView {
       const cur = () => this.host.state(this.i).shapes[pk];
       let gesture = false;
       const knob = (which: "fadeIn" | "fadeOut", label: string) => new MiniKnob({
-        label, aria: `${label} of the selected area`, get: () => fadeToKnob(cur()?.[which] ?? 0), reset: 0,
+        label, aria: `${label} of the selected area`, get: () => fadeToKnob(cur()?.[which] ?? 0), reset: 0, tip: HELP[which],
         format: (v) => fadeLabel(knobToFade(v)),
         set: (v) => {
           this.host.editShapes(this.i, (shapes) => { const t = shapes[pk]; if (t) t[which] = knobToFade(v); }, { undo: !gesture, render: true });
