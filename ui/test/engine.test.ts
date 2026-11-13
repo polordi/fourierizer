@@ -95,15 +95,18 @@ test("Tape pitch: +12 st doubles the frequency and halves the length", () => {
   assert.ok(Math.abs(peakHz(down, sr) - 1000 * 2 ** (-7 / 12)) < 10);
 });
 
-test("operations: Max of identical layers equals the layer; Sub of a layer by itself is silent", () => {
-  const sr = 8000, n = 4000, x = Float64Array.from({ length: n }, (_, i) => Math.sin(2 * Math.PI * 500 * i / sr));
-  const shapes: Shape[] = [{ kind: "rect", mode: "add", t: [-1, 10], f: [0, 1e9], featherS: 0, featherOct: 0 }];
-  const l = { channels: [x], shapes, featherS: 0, featherOct: 0, gainDb: 0, offsetS: 0 };
-  const grid: Grid = { window: "hann", L: 512, N: 512, H: 128 };
-  const max = renderOp([l, l], "max", sr, 0, 1, grid, 1, 0);
-  assert.ok(maxAbsDiff(max[0], x) < 1e-9);
-  const sub = renderOp([l, l], "subtract", sr, 0, 1, grid, 1, 0);
-  assert.ok(sub[0].every((v) => v === 0) || Math.max(...sub[0].map(Math.abs)) === 0);
+test("operations (max, cross, product) match render_op", () => {
+  const g = load("ops.json");
+  const layers = g.layers.map((l: { x: number[][]; shapes: Shape[]; gainDb: number; offsetS: number }) => ({
+    channels: l.x, shapes: l.shapes, featherS: 0.01, featherOct: 1 / 12, gainDb: l.gainDb, offsetS: l.offsetS,
+  }));
+  for (const c of g.cases) {
+    const y = renderOp(layers, c.op, g.sr, c.a, c.b, g.grid as Grid);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = maxAbsDiff(y[ch], c.y[ch]);
+      assert.ok(d < 1e-9, `${c.op} (${c.a}, ${c.b}) channel ${ch}: max diff ${d}`);
+    }
+  }
 });
 
 test("spectrogram puts a 1 kHz tone on the right row", () => {

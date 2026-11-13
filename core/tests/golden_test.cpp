@@ -13,8 +13,10 @@
 
 #include "fourierizer/fft.h"
 #include "fourierizer/mask.h"
+#include "fourierizer/ops.h"
 #include "fourierizer/render.h"
 #include "fourierizer/resample.h"
+#include "fourierizer/spectrogram.h"
 #include "fourierizer/stft.h"
 #include "fourierizer/windows.h"
 
@@ -176,6 +178,39 @@ void testResample() {
     }
 }
 
+void testOps() {
+    std::puts("operations (render_op)");
+    const json g = load("ops.json");
+    std::vector<OpLayer> layers;
+    for (auto& l : g["layers"]) {
+        OpLayer o{channelsOf(l["x"]), shapesOf(l["shapes"])};
+        o.gainDb = l["gainDb"]; o.offsetS = l["offsetS"];
+        layers.push_back(std::move(o));
+    }
+    for (auto& c : g["cases"]) {
+        const std::string op = c["op"];
+        const Channels y = renderOp(layers, opFromName(op), g["sr"], c["a"], c["b"], gridOf(g["grid"]));
+        double d = 0;
+        for (int ch = 0; ch < 2; ++ch) d = std::max(d, maxAbsDiff(y[ch], c["y"][ch]));
+        check(d < 1e-9, op + " (" + std::to_string(c["a"].get<int>()) + ", " + std::to_string(c["b"].get<int>()) + ")" + fmt(": max diff %.2e", d));
+    }
+}
+
+void testSpectrogram() {
+    std::puts("display spectrogram");
+    const double sr = 48000;
+    Signal x(48000);
+    for (size_t i = 0; i < x.size(); ++i) x[i] = std::sin(2 * std::numbers::pi * 1000 * i / sr);
+    const auto img = spectrogramImage(x, sr, {Window::Hann, 4096, 4096, 1024}, 50, 360);
+    // brightest row of the middle column must sit at 1 kHz on the log axis
+    int best = 0;
+    const int col = img.cols / 2;
+    for (int r = 0; r < img.rows; ++r)
+        if (img.data[r * img.cols + col] > img.data[best * img.cols + col]) best = r;
+    const double y = (best + 0.5) / img.rows, f = kSpecFMin * std::pow(kSpecFMax / kSpecFMin, 1 - y);
+    check(std::abs(std::log2(f / 1000)) < 0.03 && img.data[best * img.cols + col] == 255, fmt("1 kHz tone lands at %.0f Hz", f));
+}
+
 void testProperties() {
     std::puts("properties");
     // Full selection reproduces the input (perfect reconstruction).
@@ -214,6 +249,8 @@ int main() {
         testMasks();
         testRender();
         testResample();
+        testOps();
+        testSpectrogram();
         testProperties();
     } catch (const std::exception& e) {
         std::printf("error: %s\n", e.what());

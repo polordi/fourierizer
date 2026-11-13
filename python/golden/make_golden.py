@@ -17,6 +17,7 @@ from fourierizer_ref.stft import Grid                              # noqa: E402
 from fourierizer_ref.mask import Rect, Polygon, Selection          # noqa: E402
 from fourierizer_ref.render import Layer, render                   # noqa: E402
 from fourierizer_ref.audio import resample_by_step                 # noqa: E402
+from fourierizer_ref.ops import OpLayer, render_op                 # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "data"
 SR = 8000
@@ -105,6 +106,25 @@ def main() -> None:
     steps = [2 ** (7 / 12), 2 ** (-5 / 12), 2.0, 44100 / 48000, 48000 / 44100]
     resample_doc = {"x": arr(xr), "cases": [{"step": s, "y": arr(resample_by_step(xr, s))} for s in steps]}
     (OUT / "resample.json").write_text(json.dumps(resample_doc))
+
+    # Operations on a common grid: three layers (stereo, mono, stereo) with gains, offsets, fades.
+    op_grid = Grid("hann", 256, 256, 64)
+    xo = 0.5 * np.sin(2 * np.pi * 220 * t[:2400]) * np.exp(-t[:2400] * 2) + 0.05 * rng.standard_normal(2400)
+    op_layers = [
+        OpLayer(stereo, sel, gain_db=-2.0, offset_s=0.0),
+        OpLayer(xo[None], Selection((Rect(t=(0.0, 0.25), f=(100, 3000), feather_s=0.01, feather_oct=1 / 12, fade_out=0.1),)),
+                gain_db=0.0, offset_s=0.03),
+        OpLayer(np.stack([xo, -xo]), Selection((Rect(t=(0.05, 0.2), f=(300, 2000), feather_s=0.01, feather_oct=1 / 6),)),
+                gain_db=-6.0, offset_s=-0.01),
+    ]
+    op_doc = {
+        "sr": SR, "grid": grid_json(op_grid),
+        "layers": [{"x": [arr(c) for c in np.atleast_2d(l.audio)], "shapes": [shape_json(s) for s in l.selection.shapes],
+                    "gainDb": l.gain_db, "offsetS": l.offset_s} for l in op_layers],
+        "cases": [{"op": op, "a": a, "b": b, "y": [arr(c) for c in render_op(op_layers, op, SR, a, b, op_grid)]}
+                  for op, a, b in [("max", 0, 1), ("cross", 0, 1), ("cross", 2, 0), ("product", 1, 2)]],
+    }
+    (OUT / "ops.json").write_text(json.dumps(op_doc))
     print("golden files written to", OUT)
 
 

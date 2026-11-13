@@ -1,4 +1,4 @@
-// Operations other than the sum (PLAN §3.3, §4.6). They need one common time-frequency grid:
+// Operations other than the sum (PLAN §3.3, §4.6), identical to python/fourierizer_ref/ops.py. They need one common time-frequency grid:
 // every layer is analysed again on that grid (after pitch, gain and offset), its mask is
 // applied, and the layers are combined cell by cell before a single inverse STFT.
 
@@ -7,14 +7,13 @@ import { binFreqs, frameCount, gridWindow, validateGrid, type Grid } from "./stf
 import { logFreqs, SelectionRaster, type Shape } from "./mask.ts";
 import { normalize } from "./render.ts";
 
-export type Op = "sum" | "max" | "cross" | "product" | "subtract";
+export type Op = "sum" | "max" | "cross" | "product";
 
 export const OPS: { id: Op; label: string; pair: boolean; hint: string }[] = [
   { id: "sum", label: "Sum", pair: false, hint: "Σ gᵢ·χᵢ — every selection sounds together" },
   { id: "max", label: "Max", pair: false, hint: "Loudest layer wins each cell — a spectral collage" },
   { id: "cross", label: "Cross", pair: true, hint: "|χA|·e^{i∠χB} — body of A, motion of B" },
   { id: "product", label: "Prod", pair: true, hint: "|χA|·χB — A prints its spectrum on B (convolution)" },
-  { id: "subtract", label: "Sub", pair: true, hint: "max(|χA|−|χB|, 0)·e^{i∠χA} — take B out of A" },
 ];
 
 export interface OpLayer {
@@ -94,10 +93,8 @@ function combine(op: Exclude<Op, "sum">, re: Float64Array[], im: Float64Array[],
     const aMag = Math.hypot(aRe, aIm), bMag = Math.hypot(bRe, bIm);
     if (op === "cross") {
       const s = bMag > 1e-12 ? aMag / bMag : 0; oRe[k] = bRe * s; oIm[k] = bIm * s;
-    } else if (op === "product") {
-      oRe[k] = bRe * aMag; oIm[k] = bIm * aMag;
     } else {
-      const s = aMag > 1e-12 ? Math.max(aMag - bMag, 0) / aMag : 0; oRe[k] = aRe * s; oIm[k] = aIm * s;
+      oRe[k] = bRe * aMag; oIm[k] = bIm * aMag;
     }
   }
 }

@@ -18,7 +18,9 @@ add_library(fourierizer-core STATIC
     src/stft.cpp
     src/mask.cpp
     src/resample.cpp
-    src/render.cpp)
+    src/render.cpp
+    src/ops.cpp
+    src/spectrogram.cpp)
 add_library(fourierizer::core ALIAS fourierizer-core)
 target_include_directories(fourierizer-core PUBLIC include)
 target_compile_features(fourierizer-core PUBLIC cxx_std_20)

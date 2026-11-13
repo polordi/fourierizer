@@ -347,7 +347,7 @@ Tamaño relativo: S / M / L. Cada hito cierra con: demo o entregable, nota en `d
 | **H6 · Modo Spectral** | Tocar sin cambiar la duración | Switch Tape/Spectral funcional: pitch shift espectral (phase vocoder con phase locking) con render por nota cacheado | Comparación A/B Tape vs Spectral | M |
 | **H7 · Capas pro** | Control fino | Pitch y offset por capa, iteraciones ("→ Slot" + historial), presets | Ronda de feedback #2 | M |
 | **H8 · Selección avanzada + multirresolución + captura** | Versatilidad | Pincel, armónica (f₀·k), varita, booleanas; multirresolución por bandas; plugin compañero **Fourierizer Capture** + navegador de capturas | Ronda de feedback #3 | L |
-| **H9 · Operaciones v2.1** (si decides) | Nuevas síntesis | Cross-synthesis, máximo espectral, etc. Se prueban primero en el demo web (puede adelantarse desde H3); en C++ solo las que te convenzan | Tu veredicto auditivo | M |
+| **H9 · Operaciones v2.1** (decidido 2026-11-12: **Sum, Max, Cross y Product** entran desde la v2.0; Subtract se descarta) | Nuevas síntesis | Cross-synthesis, máximo espectral, etc. Se prueban primero en el demo web (puede adelantarse desde H3); en C++ solo las que te convenzan | Tu veredicto auditivo | M |
 | **H10 · Release 2.0** | Que tus amigos lo usen | Instaladores Win/Mac, licencia decidida, firma (según §3.8), página de descarga, manual de usuario, **documento teórico final en PDF (español) + traducción al inglés** | Un amigo con Mac y uno con Windows lo instalan solos | M |
 | **H11 · Fábrica de plugins** | Reutilizar todo esto | Repo plantilla aparte + **skills de Claude** (§12) | Crear un plugin nuevo "vacío" desde la plantilla en minutos | M |
 
