@@ -45,3 +45,18 @@ Fuente: [cuestionario](https://claude.ai/artifact/LiPkSDsoYdWTBtYxPKqwn4) (`brie
    - **Fader:** niveles comparables lado a lado (mezcla de las 4 capas).
    - **Valor numérico con ±:** discretos o exactos (N, H, semitonos, nota raíz, voces).
    - **Selector segmentado:** opciones (ventana, Tape/Spectral).
+
+## Ronda 1 · distribución de la ventana (2026-11-12)
+
+Fuente: [lienzo de mockups](https://claude.ai/artifact/2fatUahm41tSWiQMWQVHch).
+
+Se presentaron tres distribuciones: A (cuadrícula 2×2 + resultado), B (editor enfocado con riel de capas) y C (carriles sobre una línea de tiempo compartida).
+
+**Decisión:** A y B combinadas; C se descarta.
+
+- La ventana arranca en la cuadrícula 2×2 (A).
+- Cada capa tiene un botón de enfoque. Al presionarlo, la capa crece hasta ocupar el editor de B y las otras tres se encogen al riel lateral. La animación usa el rebote del sistema de diseño (~560 ms) y va escalonada por capa.
+- Desde el editor se vuelve a la cuadrícula o se salta a otra capa desde el riel. En la barra superior hay además un selector *View: Grid · 1–4*.
+- El resultado, el sampler (Keytrack, Root, ADSR) y la mezcla (faders L1–L4) quedan fijos abajo en ambas vistas.
+
+Veredicto del usuario sobre el prototipo interactivo: "Está impresionante. Me fascina."
