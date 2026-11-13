@@ -76,6 +76,45 @@ export class Sampler {
     try { v.src.stop(now + this.env.r + 0.02); } catch { /* already stopped */ }
   }
 
+  // ---- layer preview: one-shot playback of a single layer's selection, outside the keyboard voices
+  private preview: { src: AudioBufferSourceNode; gain: GainNode; start: number; dur: number; layer: number } | null = null;
+  onPreviewEnd: ((layer: number) => void) | null = null;
+
+  /** Play `channels` once (peaks above −0.2 dBFS are scaled down, never up). */
+  playPreview(layer: number, channels: Float32Array[], sr: number, peak: number): void {
+    const ctx = this.ensure();
+    this.stopPreview();
+    if (!this.master || !channels.length || !channels[0].length) return;
+    const b = ctx.createBuffer(channels.length, channels[0].length, sr);
+    channels.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    const src = ctx.createBufferSource(), gain = ctx.createGain(), now = ctx.currentTime;
+    src.buffer = b;
+    gain.gain.value = peak > 0.977 ? 0.977 / peak : 1;
+    src.connect(gain).connect(this.master);
+    src.start(now);
+    this.preview = { src, gain, start: now, dur: b.duration, layer };
+    src.onended = () => { if (this.preview?.src === src) { this.preview = null; this.onPreviewEnd?.(layer); } };
+    this.onActivity?.();
+  }
+
+  stopPreview(): void {
+    const p = this.preview;
+    if (!p || !this.ctx) return;
+    this.preview = null;
+    const now = this.ctx.currentTime, g = p.gain.gain;
+    g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0, now + 0.015);
+    try { p.src.stop(now + 0.02); } catch { /* already stopped */ }
+    this.onPreviewEnd?.(p.layer);
+  }
+
+  /** Layer being previewed (−1 if none) and the position (0..1) in its selection. */
+  get previewLayer(): number { return this.preview?.layer ?? -1; }
+  previewPos(): number {
+    if (!this.ctx || !this.preview) return -1;
+    const pos = (this.ctx.currentTime - this.preview.start) / this.preview.dur;
+    return pos >= 0 && pos <= 1 ? pos : -1;
+  }
+
   /** Position (0..1) in the buffer of the most recent sounding voice, or −1. */
   playhead(): number {
     if (!this.ctx || !this.buffer || !this.voices.length) return -1;

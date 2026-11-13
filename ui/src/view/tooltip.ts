@@ -44,17 +44,20 @@ export function installTooltips(): void {
     target = null;
   };
 
+  // After a press, the pressed control stays quiet until the pointer leaves it.
+  let pressed: HTMLElement | null = null;
   const enter = (t: HTMLElement | null) => {
     if (t === target) return;
     hide();
-    if (!t) return;
+    if (t !== pressed) pressed = null;
+    if (!t || t === pressed) return;
     target = t;
     timer = window.setTimeout(show, performance.now() - hiddenAt < CHAIN_MS ? 0 : SHOW_MS);
   };
 
   document.addEventListener("pointerover", (e) => { if (e.pointerType !== "touch") enter(source(e.target)); });
   document.addEventListener("pointerout", (e) => { if (!source(e.relatedTarget)) hide(); });
-  document.addEventListener("pointerdown", () => { hide(); hiddenAt = 0; }, true);
+  document.addEventListener("pointerdown", (e) => { pressed = source(e.target); hide(); hiddenAt = 0; }, true);
   document.addEventListener("focusin", (e) => { if ((e.target as Element).matches?.(":focus-visible")) enter(source(e.target)); });
   document.addEventListener("focusout", hide);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") hide(); });

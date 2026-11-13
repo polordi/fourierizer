@@ -24,6 +24,7 @@ export interface LayerHost {
   capture(i: number): void;
   toggleMute(i: number): void;
   toggleSolo(i: number): void;
+  togglePreview(i: number): void;
   picked(): { layer: number; shape: number } | null;
   setPicked(p: { layer: number; shape: number } | null): void;
   ensureAudio(): void;
@@ -99,6 +100,8 @@ export class LayerView {
   private led: HTMLElement;
   private muteB: HTMLButtonElement;
   private soloB: HTMLButtonElement;
+  private playB: HTMLButtonElement;
+  private playhead: HTMLElement;
   private focusB: HTMLButtonElement;
   private canvas: HTMLCanvasElement;
   private svg: SVGSVGElement;
@@ -121,6 +124,7 @@ export class LayerView {
     this.led = h("span", { class: "led full", title: "Loaded" });
     this.muteB = key("M", null, { class: "sm", "aria-label": `Mute layer ${n}`, "aria-pressed": "false", title: HELP.mute }, () => host.toggleMute(i));
     this.soloB = key("S", null, { class: "sm", "aria-label": `Solo layer ${n}`, "aria-pressed": "false", title: HELP.solo }, () => host.toggleSolo(i));
+    this.playB = key(null, ICONS.play, { class: "sm", "aria-label": `Play the selection of layer ${n}`, "aria-pressed": "false", title: HELP.playLayer }, () => host.togglePreview(i));
     this.focusB = key(null, ICONS.focus, { class: "sm", "aria-label": `Focus layer ${n}`, title: `Focus layer ${n}` }, () => host.focus(this.mode === "editor" ? 0 : n));
     this.fileInput = h("input", { type: "file", accept: "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg,.m4a", hidden: true, "aria-label": `Audio file for layer ${n}` });
     this.fileInput.addEventListener("change", () => { const f = this.fileInput.files?.[0]; if (f) host.load(i, f); this.fileInput.value = ""; });
@@ -134,7 +138,7 @@ export class LayerView {
         this.led,
         key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound (or drop a file here)" }, () => { host.ensureAudio(); this.fileInput.click(); }),
         key(null, ICONS.rec, { class: "sm", "aria-label": "Capture from the mixer", title: "Capture from the mixer" }, () => host.capture(i))),
-      this.muteB, this.soloB, this.focusB, this.fileInput);
+      this.playB, this.muteB, this.soloB, this.focusB, this.fileInput);
 
     // display
     const yax = h("div", { class: "yax", "aria-hidden": "true" },
@@ -144,7 +148,8 @@ export class LayerView {
     this.handles = h("div", { style: "position:absolute;inset:0;pointer-events:none" });
     this.cursor = h("span", { class: "cursor-ro ro-sm ink" });
     this.hint = h("div", { class: "empty-hint silk" });
-    this.display = h("div", { class: "display" }, this.canvas, this.svg, this.handles, this.hint, this.cursor);
+    this.playhead = h("span", { class: "playhead", "aria-hidden": "true" });
+    this.display = h("div", { class: "display" }, this.canvas, this.svg, this.playhead, this.handles, this.hint, this.cursor);
     this.xax = h("div", { class: "xax", "aria-hidden": "true" });
     const body = h("div", { class: "lbody" }, yax, this.display, this.xax);
 
@@ -232,6 +237,7 @@ export class LayerView {
     this.led.dataset.on = String(l.loaded);
     this.muteB.setAttribute("aria-pressed", String(l.mute));
     this.soloB.setAttribute("aria-pressed", String(l.solo));
+    this.playB.disabled = !l.loaded;
     this.hint.textContent = l.loaded ? (l.shapes.length ? "" : "Draw on the spectrogram to select") : "Drop a sound here or press Load";
     this.hint.style.display = this.hint.textContent ? "" : "none";
     this.refreshParams();
@@ -255,6 +261,17 @@ export class LayerView {
     const spans: HTMLElement[] = [];
     for (let t = 0; t < dur - step * 0.3; t += step) spans.push(h("span", { class: "ro-sm", style: `left:${(t / dur * 100).toFixed(2)}%` }, `${+t.toFixed(1)} s`));
     this.xax.replaceChildren(...spans);
+  }
+
+  /** Play button state and the playhead over this layer's spectrogram (pos −1 hides it). */
+  setPreviewing(on: boolean): void {
+    this.playB.setAttribute("aria-pressed", String(on));
+    this.playB.replaceChildren(icon(on ? ICONS.stop : ICONS.play));
+    if (!on) this.setPlayhead(-1);
+  }
+  setPlayhead(pos: number): void {
+    this.playhead.style.display = pos < 0 ? "none" : "block";
+    if (pos >= 0) this.playhead.style.left = `${pos * 100}%`;
   }
 
   setSpectrogram(img: { data: Uint8Array; cols: number; rows: number }): void {

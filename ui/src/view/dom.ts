@@ -47,6 +47,7 @@ export const ICONS = {
   clear: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.7 9.5h5.6l.7-9.5"/>',
   midi: '<circle cx="8" cy="8" r="6"/><circle cx="5" cy="7" r=".6"/><circle cx="11" cy="7" r=".6"/><circle cx="8" cy="5" r=".6"/><circle cx="6" cy="10" r=".6"/><circle cx="10" cy="10" r=".6"/>',
   play: '<path d="M4 2.5v11l9-5.5z"/>',
+  stop: '<rect x="3.5" y="3.5" width="9" height="9"/>',
 };
 
 export function screws(): HTMLElement[] {

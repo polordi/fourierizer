@@ -31,6 +31,7 @@ export const HELP = {
   sustain: "Sustain: level held while the key stays down.",
   release: "Release: time to fade to silence after the key is released.",
   level: "Level of this layer in the result.",
+  playLayer: "Play only this layer's selection, as it enters the result (at its own pitch, without offset or level). Press again to stop.",
   mute: "Mute: leave this layer out of the result.",
   solo: "Solo: hear only the soloed layers in the result.",
 };

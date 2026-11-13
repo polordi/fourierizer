@@ -3,7 +3,7 @@
 
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
-import type { LayerJob, RenderReply, SpectrogramReply, WorkerReply, WorkerRequest } from "./protocol.ts";
+import type { LayerJob, LayerReply, RenderReply, SpectrogramReply, WorkerReply, WorkerRequest } from "./protocol.ts";
 
 export interface Host {
   readonly name: string;
@@ -11,6 +11,7 @@ export interface Host {
   setSource(id: number, channels: Float32Array[]): void;
   spectrogram(id: number, pitch: number, grid: Grid, sr: number): Promise<SpectrogramReply>;
   render(job: { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[] }): Promise<RenderReply>;
+  layer(job: LayerJob, sr: number): Promise<LayerReply>;
 }
 
 declare const __WORKER_SOURCE__: string;
@@ -53,5 +54,8 @@ export class BrowserHost implements Host {
   }
   render(job: { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[] }): Promise<RenderReply> {
     return this.call({ type: "render", req: this.next++, ...job });
+  }
+  layer(job: LayerJob, sr: number): Promise<LayerReply> {
+    return this.call({ type: "layer", req: this.next++, sr, job });
   }
 }

@@ -15,11 +15,15 @@ export type WorkerRequest =
   | { type: "examples"; req: number; sr: number }
   | { type: "source"; id: number; channels: Float32Array[] }
   | { type: "spectrogram"; req: number; id: number; pitch: number; grid: Grid; sr: number }
-  | { type: "render"; req: number; sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[] };
+  | { type: "render"; req: number; sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[] }
+  | { type: "layer"; req: number; sr: number; job: LayerJob };
 
 export interface SpectrogramReply extends SpectrogramImage { type: "spectrogram"; req: number; id: number; duration: number; }
 export interface RenderReply { type: "render"; req: number; channels: Float32Array[]; peak: number; ms: number; image: SpectrogramImage | null; }
+/** One layer's selection on its own: masked resynthesis of the (pitched) source, no offset or level. */
+export interface LayerReply { type: "layer"; req: number; channels: Float32Array[]; peak: number; }
 export type WorkerReply =
+  | LayerReply
   | { type: "examples"; req: number; sounds: Float32Array[] }
   | SpectrogramReply
   | RenderReply

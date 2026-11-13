@@ -98,6 +98,28 @@ class App implements LayerHost {
     this.toast("Capturing from the mixer works inside FL Studio with the Fourierizer Capture plugin.");
   }
   toggleMute(i: number): void { const l = this.st.layers[i]; l.mute = !l.mute; this.views[i].refresh(); this.scheduleRender(); }
+  private previewReq = 0;
+  togglePreview(i: number): void {
+    this.ensureAudio();
+    if (this.sampler.previewLayer === i || this.previewWanted === i) { this.previewWanted = -1; this.previewReq++; this.sampler.stopPreview(); this.views[i].setPreviewing(false); return; }
+    const l = this.st.layers[i];
+    if (!l.loaded) return;
+    if (!l.shapes.length) { this.toast(`Nothing is selected on layer ${i + 1} yet`); return; }
+    if (this.previewWanted >= 0) this.views[this.previewWanted].setPreviewing(false);
+    this.sampler.stopPreview();
+    this.previewWanted = i;
+    this.views[i].setPreviewing(true);
+    const req = ++this.previewReq;
+    this.host.layer(this.job(l), SR).then((r) => {
+      if (req !== this.previewReq) return;
+      this.previewWanted = -1;
+      if (!(r.peak > 0)) { this.views[i].setPreviewing(false); this.toast(`The selection on layer ${i + 1} is silent`); return; }
+      this.sampler.playPreview(i, r.channels, SR, r.peak);
+      this.views[i].setPreviewing(true);
+    }).catch((e: Error) => { if (req === this.previewReq) { this.previewWanted = -1; this.views[i].setPreviewing(false); this.toast(e.message); } });
+  }
+  private previewWanted = -1;
+
   toggleSolo(i: number): void { const l = this.st.layers[i]; l.solo = !l.solo; this.views[i].refresh(); this.scheduleRender(); }
 
   async load(i: number, file: File): Promise<void> {
@@ -119,6 +141,7 @@ class App implements LayerHost {
     l.name = name; l.loaded = true; l.samples = channels[0].length; l.channels = channels.length;
     if (!keepShapes) { l.shapes = []; l.pitch = 0; l.offset = 0; }
     if (this.pickedShape?.layer === i) this.pickedShape = null;
+    if (this.sampler.previewLayer === i) this.sampler.stopPreview();
     this.host.setSource(i, channels);
     this.views[i].clearSpectrogram();
     this.views[i].refresh();
@@ -364,6 +387,7 @@ class App implements LayerHost {
     new ResizeObserver(() => this.layout(false)).observe(this.layersEl);
     this.layout(false);
     this.sampler.onActivity = () => this.animatePlayhead();
+    this.sampler.onPreviewEnd = (i) => { if (this.previewWanted !== i) this.views[i].setPreviewing(false); };
     this.wireKeyboard();
   }
 
@@ -385,8 +409,9 @@ class App implements LayerHost {
   private animatePlayhead(): void {
     if (this.raf) return;
     const tick = () => {
-      const p = this.sampler.playhead();
-      if (p < 0) { this.playheadEl.style.display = "none"; this.raf = 0; if (!this.sampler.active) return; }
+      const p = this.sampler.playhead(), lp = this.sampler.previewLayer;
+      if (lp >= 0) this.views[lp].setPlayhead(this.sampler.previewPos());
+      if (p < 0) { this.playheadEl.style.display = "none"; this.raf = 0; if (!this.sampler.active && lp < 0) return; }
       else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${p * 100}%`; }
       this.raf = requestAnimationFrame(tick);
     };

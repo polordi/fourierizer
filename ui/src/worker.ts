@@ -79,6 +79,13 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         ctx.postMessage({ type: "render", req: msg.req, channels: chans, peak: peakLin, ms: performance.now() - t0, image: img }, transfer);
         break;
       }
+      case "layer": {
+        const l = msg.job;
+        const y = synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct }, msg.sr);
+        const chans = y.map((c) => Float32Array.from(c));
+        ctx.postMessage({ type: "layer", req: msg.req, channels: chans, peak: peakOf(y) }, chans.map((c) => c.buffer));
+        break;
+      }
     }
   } catch (err) {
     ctx.postMessage({ type: "error", req: (msg as { req?: number }).req, message: (err as Error).message });
