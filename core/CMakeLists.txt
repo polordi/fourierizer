@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(FourierizerCore VERSION 0.4.0 LANGUAGES CXX)
+    project(FourierizerCore VERSION 0.5.0 LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
@@ -20,6 +20,7 @@ add_library(fourierizer-core STATIC
     src/resample.cpp
     src/render.cpp
     src/ops.cpp
+    src/spectral.cpp
     src/spectrogram.cpp)
 add_library(fourierizer::core ALIAS fourierizer-core)
 target_include_directories(fourierizer-core PUBLIC include)

@@ -11,6 +11,9 @@ float releaseSeconds(float v) { return 0.005f + v * v * 4.995f; }
 juce::String ms(float s) { return s < 1 ? juce::String(juce::roundToInt(s * 1000)) + " ms" : juce::String(s, 2) + " s"; }
 
 const juce::StringArray kNoteNames{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+const juce::StringArray kModes{"Tape", "Spectral"};
+const juce::StringArray kWindows{"Tonal", "Mixed", "Punchy"};   // spectral window 4096 / 2048 / 1024
+constexpr int kWindowSizes[] = {4096, 2048, 1024};
 juce::String noteName(int n) { return kNoteNames[n % 12] + juce::String(n / 12 - 1); }
 } // namespace
 
@@ -30,6 +33,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout FourierizerProcessor::create
                                                          juce::AudioParameterIntAttributes().withStringFromValueFunction([](int v, int) { return noteName(v); })));
     layout.add(std::make_unique<P>(juce::ParameterID{"volume", 1}, "Volume", juce::NormalisableRange<float>(-36, 6, 0.1f), -3.0f,
                                    Attr().withLabel("dB")));
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"mode", 1}, "Mode", kModes, 0));
+    layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"window", 1}, "Spectral window", kWindows, 0));
     return layout;
 }
 
@@ -42,6 +47,9 @@ FourierizerProcessor::FourierizerProcessor()
     release_ = parameters.getRawParameterValue("release");
     root_ = parameters.getRawParameterValue("root");
     volume_ = parameters.getRawParameterValue("volume");
+    mode_ = parameters.getRawParameterValue("mode");
+    window_ = parameters.getRawParameterValue("window");
+    sampler.setBank(&bank);
     startTimerHz(4);
 }
 
@@ -67,7 +75,9 @@ void FourierizerProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     buffer.clear();
     const auto env = envelopeFromKnobs(attack_->load(), decay_->load(), sustain_->load(), release_->load());
     gain_.setTargetValue(juce::Decibels::decibelsToGain(volume_->load()));
-    sampler.process(buffer, midi, env, juce::roundToInt(root_->load()), 1.0f);
+    const bool spectral = mode_->load() > 0.5f;
+    bank.configure(spectral, kWindowSizes[juce::jlimit(0, 2, juce::roundToInt(window_->load()))]);
+    sampler.process(buffer, midi, env, juce::roundToInt(root_->load()), 1.0f, spectral, isNonRealtime());
     gain_.applyGain(buffer, buffer.getNumSamples());
 }
 
@@ -78,6 +88,8 @@ juce::var FourierizerProcessor::samplerParams() const {
     o->setProperty("s", sustain_->load());
     o->setProperty("r", release_->load());
     o->setProperty("root", juce::roundToInt(root_->load()));
+    o->setProperty("mode", kModes[juce::jlimit(0, 1, juce::roundToInt(mode_->load()))].toLowerCase());
+    o->setProperty("window", kWindows[juce::jlimit(0, 2, juce::roundToInt(window_->load()))].toLowerCase());
     return juce::var(o);
 }
 
@@ -94,6 +106,12 @@ void FourierizerProcessor::setSamplerParams(const juce::var& p) {
     set("sustain", p["s"]);
     set("release", p["r"]);
     set("root", p["root"]);
+    auto choice = [&](const char* id, const juce::StringArray& names, const juce::var& v) {
+        const int i = names.indexOf(v.toString(), true);
+        if (v.isString() && i >= 0) set(id, i);
+    };
+    choice("mode", kModes, p["mode"]);
+    choice("window", kWindows, p["window"]);
 }
 
 void FourierizerProcessor::getStateInformation(juce::MemoryBlock& destData) {

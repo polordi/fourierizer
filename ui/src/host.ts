@@ -6,14 +6,19 @@
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
 import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
+import { SPECTRAL_N, type SpectralWindow } from "./dsp/spectral.ts";
 import type { LayerJob, WorkerReply, WorkerRequest } from "./protocol.ts";
 import { Sampler } from "./audio/sampler.ts";
 import { MAX_SECONDS, SR, adsrMap } from "./model.ts";
 
 export interface SourceInfo { name: string; samples: number; channels: number; trimmed?: boolean; }
 export interface ResultInfo { image: SpectrogramImage | null; peak: number; ms: number; duration: number; }
-export interface PlayState { result: number; preview: number; previewPos: number; voices: number; }
-export interface SamplerParams { a: number; d: number; s: number; r: number; root: number; }
+/** spectralReady / spectralTotal: Spectral copies already computed among the ±12 st computed ahead. */
+export interface PlayState { result: number; preview: number; previewPos: number; voices: number; spectralReady?: number; spectralTotal?: number; }
+export interface SamplerParams {
+  a: number; d: number; s: number; r: number; root: number;
+  mode?: "tape" | "spectral"; window?: SpectralWindow;
+}
 export interface Restored { project: string | null; layers: (SourceInfo | null)[]; result: ResultInfo | null; params: SamplerParams | null; }
 export interface RenderJob { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; axis: Axis; }
 
@@ -80,6 +85,7 @@ export class BrowserHost implements Host {
       if (m.type === "error") p.reject(new Error(m.message)); else p.resolve(m as never);
     };
     this.sampler.onActivity = () => this.onPlay?.();
+    this.sampler.shifted = (shift) => this.shiftedBuffer(shift);
   }
 
   private call<T>(msg: WorkerRequest, transfer: Transferable[] = []): Promise<T> {
@@ -128,13 +134,14 @@ export class BrowserHost implements Host {
     return r.image;
   }
 
-  clearResult(): void { this.result = null; this.sampler.setResult([], SR); }
+  clearResult(): void { this.result = null; this.sampler.setResult([], SR); this.resetBank(); }
 
   async render(job: RenderJob): Promise<ResultInfo> {
     const r = await this.call<{ channels: Float32Array[]; peak: number; ms: number; image: SpectrogramImage | null }>({ type: "render", req: this.next++, ...job });
     const n = r.channels[0]?.length ?? 0;
     this.result = n ? r.channels : null;
     this.sampler.setResult(this.result ?? [], SR);
+    this.resetBank();
     return { image: n ? r.image : null, peak: r.peak, ms: r.ms, duration: n / SR };
   }
 
@@ -159,11 +166,74 @@ export class BrowserHost implements Host {
   allOff(): void { this.sampler.allOff(); }
   setSampler(p: SamplerParams): void {
     this.sampler.root = p.root;
+    if (p.window && p.window !== this.window) { this.window = p.window; this.resetBank(); }
+    if (p.mode && p.mode !== this.sampler.mode) { this.sampler.mode = p.mode; this.pump(); this.onPlay?.(); }
     this.sampler.env = { a: adsrMap.a(p.a), d: adsrMap.d(p.d), s: adsrMap.s(p.s), r: adsrMap.r(p.r) };
   }
   playState(): PlayState {
     const s = this.sampler;
-    return { result: s.playhead(), preview: s.previewLayer, previewPos: s.previewPos(), voices: s.active };
+    let ready = 0;
+    for (const k of this.shifted.keys()) if (Math.abs(k) <= 12) ready++;
+    const total = this.sampler.mode === "spectral" && this.result ? 24 : 0;
+    return { result: s.playhead(), preview: s.previewLayer, previewPos: s.previewPos(), voices: s.active, spectralReady: ready, spectralTotal: total };
+  }
+
+  // ---- Spectral mode: copies of the result shifted by whole semitones, computed by the worker
+  // one at a time: first the notes that were played, then ±12 st around the root.
+  private window: SpectralWindow = "tonal";
+  private bankGen = 0;
+  private shifted = new Map<number, { channels: Float32Array[]; buffer: AudioBuffer | null }>();
+  private wanted: number[] = [];
+  private waiters = new Map<number, ((ok: boolean) => void)[]>();
+  private computing = false;
+
+  /** A new result or window: every copy is stale. */
+  private resetBank(): void {
+    this.bankGen++;
+    this.shifted.clear();
+    this.wanted = [];
+    for (const ws of this.waiters.values()) ws.forEach((w) => w(false));
+    this.waiters.clear();
+    this.pump();
+    this.onPlay?.();
+  }
+
+  private shiftedBuffer(shift: number): AudioBuffer | Promise<AudioBuffer | null> {
+    const e = this.shifted.get(shift);
+    if (e) return (e.buffer ??= this.sampler.makeBuffer(e.channels, SR));
+    return new Promise((resolve) => {
+      const list = this.waiters.get(shift) ?? [];
+      list.push((ok) => resolve(ok ? this.shiftedBuffer(shift) as AudioBuffer : null));
+      this.waiters.set(shift, list);
+      this.wanted = [shift, ...this.wanted.filter((x) => x !== shift)];
+      this.pump();
+    });
+  }
+
+  private nextShift(): number | null {
+    while (this.wanted.length) { const s = this.wanted.shift()!; if (!this.shifted.has(s)) return s; }
+    if (this.sampler.mode !== "spectral") return null;
+    for (let d = 1; d <= 12; d++) for (const s of [d, -d]) if (!this.shifted.has(s)) return s;
+    return null;
+  }
+
+  private pump(): void {
+    if (this.computing || !this.result) return;
+    const shift = this.nextShift();
+    if (shift === null) return;
+    this.computing = true;
+    const gen = this.bankGen;
+    this.call<{ channels: Float32Array[] }>({ type: "shift", req: this.next++, semitones: shift, n: SPECTRAL_N[this.window] })
+      .then((r) => {
+        if (gen !== this.bankGen || !r.channels.length) return;
+        this.shifted.set(shift, { channels: r.channels, buffer: null });
+        const ws = this.waiters.get(shift);
+        this.waiters.delete(shift);
+        ws?.forEach((w) => w(true));
+        this.onPlay?.();
+      })
+      .catch((e: Error) => console.error(e))
+      .finally(() => { this.computing = false; this.pump(); });
   }
 
   saveProject(): void { /* the demo does not persist */ }

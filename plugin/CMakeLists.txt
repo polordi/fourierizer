@@ -23,7 +23,7 @@ else()
 endif()
 
 juce_add_plugin(Fourierizer
-    VERSION                 0.5.0
+    VERSION                 0.6.0
     COMPANY_NAME            "waves_p"
     BUNDLE_ID               "com.wavesp.fourierizer"
     PLUGIN_MANUFACTURER_CODE Wvsp
@@ -47,6 +47,7 @@ juce_add_binary_data(FourierizerUI
 
 target_sources(Fourierizer PRIVATE
     source/Sampler.cpp
+    source/SpectralBank.cpp
     source/Engine.cpp
     source/PluginProcessor.cpp
     source/PluginEditor.cpp)
@@ -72,3 +73,11 @@ target_link_libraries(Fourierizer
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# ---- Sampler test: the instrument's sound without a host (Tape vs Spectral, offline and real time)
+juce_add_console_app(FourierizerSamplerTest PRODUCT_NAME "FourierizerSamplerTest")
+target_sources(FourierizerSamplerTest PRIVATE tests/SamplerTest.cpp source/Sampler.cpp source/SpectralBank.cpp)
+target_compile_definitions(FourierizerSamplerTest PRIVATE JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0)
+target_link_libraries(FourierizerSamplerTest PRIVATE
+    fourierizer::core juce::juce_audio_basics juce::juce_core
+    juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)

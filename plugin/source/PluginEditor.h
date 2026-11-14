@@ -40,7 +40,7 @@ private:
     int nextUpload_ = 1;
     std::unique_ptr<juce::FileChooser> chooser_;
     std::atomic<bool> paramsDirty_{false};
-    struct { float result = -2, preview = -2; int layer = -2, voices = -1; } lastPlay_;
+    struct { float result = -2, preview = -2; int layer = -2, voices = -1, ready = -1, ahead = -1; } lastPlay_;
     juce::WeakReference<FourierizerEditor>::Master masterReference;
     friend class juce::WeakReference<FourierizerEditor>;
 };

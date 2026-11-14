@@ -6,6 +6,7 @@ import type { Shape } from "./dsp/mask.ts";
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
 import type { Axis } from "./dsp/spectrogram.ts";
+import type { SpectralWindow } from "./dsp/spectral.ts";
 
 export const SR = 48000;
 export const MAX_SECONDS = 60;
@@ -48,6 +49,7 @@ export interface State {
   opA: number;          // layer index for pair operations
   opB: number;
   keytrack: "tape" | "spectral";
+  spectralWindow: SpectralWindow;   // Spectral mode's analysis window
   root: number;         // MIDI note
   adsr: { a: number; d: number; s: number; r: number }; // knob positions 0..1
   auto: boolean;
@@ -109,7 +111,7 @@ function layer(index: number, name: string, shapes: Shape[], extra: Partial<Laye
 export function emptyState(): State {
   return {
     layers: [0, 1, 2, 3].map((i) => layer(i, "", [])),
-    focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", root: 48,
+    focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", spectralWindow: "tonal", root: 48,
     adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true, display: { ...DEFAULT_DISPLAY },
   };
 }
@@ -134,7 +136,7 @@ export function exampleState(): State {
         { kind: "rect", mode: "subtract", t: [2.0, 2.6], f: [5000, 10000] },
       ], { levelDb: -6 }),
     ],
-    focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", root: 48,
+    focus: 0, tool: "rect", op: "sum", opA: 0, opB: 1, keytrack: "tape", spectralWindow: "tonal", root: 48,
     adsr: { a: 0.18, d: 0.33, s: 0.7, r: 0.4 }, auto: true, display: { ...DEFAULT_DISPLAY },
   };
 }

@@ -198,6 +198,21 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .sampler .keys { white-space: pre-line; text-align: right; }
 .sampler .row .seg-opt { min-width: 44px; padding: 6px 8px; }
 .sampler .knobs { display: flex; justify-content: space-between; }
+/* Keytrack: the line under the switch shows the Spectral window choice (or a Tape note), and a
+   thin bar inside the Spectral key fills while the notes around the root are computed. */
+.sampler .seg-opt { position: relative; }
+.sampler .prep { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--layer-3); transition: width 160ms linear; }
+.ktrack { justify-items: start; }
+.ktsub { display: grid; margin-left: -3px; }
+.ktsub > * { grid-area: 1 / 1; }
+.ktsub .wopts { display: flex; gap: 2px; visibility: hidden; }
+.ktsub.spectral .wopts { visibility: visible; }
+.ktsub.spectral .ro-sm { visibility: hidden; }
+.wopt { all: unset; cursor: pointer; font: 400 10px/12px var(--font-mono); color: var(--ink-muted); padding: 0 3px; border-radius: 2px; }
+.wopt + .wopt::before { content: "·"; margin-right: 5px; color: var(--seam); }
+.wopt:hover { color: var(--ink); }
+.wopt[aria-checked="true"] { color: var(--ink); font-weight: 600; }
+.wopt:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .mix { flex: none; display: flex; gap: 10px; align-items: flex-end; padding: 18px 18px 14px; }
 .pairpick { display: flex; align-items: center; gap: 6px; }
 .pairpick .seg-opt { min-width: 24px; padding: 3px 5px; }

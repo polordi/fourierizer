@@ -11,9 +11,10 @@ include/fourierizer/
   mask.h       selections in (seconds, log₂ Hz): rect / lasso, feather, add / subtract, time fades
   resample.h   Kaiser-windowed sinc resampler: Tape pitch and sample-rate conversion
   render.h     per-layer synthesis, mix (gain, offset, normalization), parallel render, cancel
+  spectral.h   Spectral mode: phase-vocoder pitch shift that keeps the length, streamed in chunks
 tests/
   golden_test.cpp   must reproduce python/golden/data to 1e-9
-  bench.cpp         4 stereo layers × 30 s at 48 kHz
+  bench.cpp         4 stereo layers × 30 s at 48 kHz, and one Spectral note
 ```
 
 ```cpp

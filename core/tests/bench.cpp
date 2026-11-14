@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "fourierizer/render.h"
+#include "fourierizer/spectral.h"
 
 using namespace fz;
 
@@ -52,4 +53,19 @@ int main(int argc, char** argv) {
         }
     }
     std::printf("hardware threads: %u\n", std::thread::hardware_concurrency());
+
+    // Spectral mode: one note of a stereo result, and how long until its first 4096 samples.
+    auto result = std::make_shared<const Channels>(source(110));
+    for (int win : {4096, 1024})
+        for (double st : {7.0, -7.0, 12.0, 24.0}) {
+            const auto t0 = std::chrono::steady_clock::now();
+            SpectralShifter s(result, st, win);
+            Channels part;
+            s.process(4096, part);
+            const double first = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            while (!s.done()) s.process(65536, part);
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            std::printf("spectral N=%-4d %+5.0f st   first 4096 samples %6.1f ms   whole %8.0f ms   %5.1fx real time\n",
+                        win, st, first, ms, seconds * 1000 / ms);
+        }
 }

@@ -22,6 +22,7 @@
 #include <mutex>
 
 #include "Sampler.h"
+#include "SpectralBank.h"
 
 namespace fzp {
 
@@ -32,7 +33,7 @@ using Done = std::function<void(juce::var)>;      // called on a background thre
 
 class Engine {
 public:
-    explicit Engine(Sampler& sampler);
+    Engine(Sampler& sampler, SpectralBank& bank);
     ~Engine();
 
     // ---- sources (any thread). Info: {name, samples, channels}
@@ -80,6 +81,7 @@ private:
     void runRender(const juce::var& request, std::shared_ptr<std::atomic<bool>> cancel, Done done);
 
     Sampler& sampler_;
+    SpectralBank& bank_;
     juce::ThreadPool pool_{3};
     juce::AudioFormatManager formats_;
 

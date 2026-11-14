@@ -1,5 +1,7 @@
-// The instrument's sound: polyphonic Tape playback of the rendered result (rate 2^((note−root)/12))
-// with an envelope per voice, plus a one-shot "preview" voice for a single layer's selection.
+// The instrument's sound: polyphonic playback of the rendered result with an envelope per voice,
+// plus a one-shot "preview" voice for a single layer's selection. Two modes:
+//   Tape      the result read at rate 2^((note−root)/12): higher is also shorter
+//   Spectral  a pitch-shifted copy per semitone (SpectralBank), read at rate 1: same length
 //
 // Real-time rules: the audio thread never allocates, locks or frees. New buffers arrive through
 // a try-locked hand-off; buffers that are no longer used are freed on the message thread by
@@ -19,7 +21,12 @@ struct SampleBuffer : juce::ReferenceCountedObject {
     using Ptr = juce::ReferenceCountedObjectPtr<SampleBuffer>;
     juce::AudioBuffer<float> audio;
     double sampleRate = 48000.0;
+    /// Spectral copies are played while they are computed: samples [0, ready) are final.
+    std::atomic<int> ready{std::numeric_limits<int>::max()};
+    std::atomic<bool> abandoned{false};   // will not grow any further (the result changed)
 };
+
+class SpectralBank;
 
 struct Envelope {
     float attack = 0.06f, decay = 0.45f, sustain = 0.7f, release = 0.8f;  // seconds / level
@@ -30,6 +37,7 @@ public:
     Sampler();
 
     void prepare(double hostSampleRate);
+    void setBank(SpectralBank* bank) { bank_ = bank; }   // before playback starts
 
     // ---- any non-audio thread
     void setResult(SampleBuffer::Ptr buffer);
@@ -43,7 +51,10 @@ public:
     void collectGarbage();  // message thread, a few times per second
 
     // ---- audio thread
-    void process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Envelope& env, int root, float gain);
+    /// `spectral`: notes keep the result's length (copies from the SpectralBank) instead of Tape.
+    /// `offline`: the host renders faster than real time, so waiting for a copy is allowed.
+    void process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Envelope& env, int root, float gain,
+                 bool spectral = false, bool offline = false);
 
     // ---- read by the UI (any thread)
     float resultPosition() const { return resultPos_.load(); }   // newest sounding voice, 0..1, or −1
@@ -55,7 +66,8 @@ public:
 private:
     struct Voice {
         bool active = false, released = false, held = false;
-        int note = 0;
+        bool waiting = false;   // Spectral: its copy does not exist yet
+        int note = 0, shift = 0;
         float velocity = 1, level = 0, releaseFrom = 0;
         double pos = 0, step = 1, t = 0, tRelease = 0;
         juce::uint32 age = 0;
@@ -63,7 +75,8 @@ private:
     };
     struct UiEvent { int type, note; float velocity; };   // 0 on, 1 off, 2 all off
 
-    void noteOn(int note, float velocity, int root);
+    void noteOn(int note, float velocity, int root, bool spectral);
+    bool attach(Voice& v, bool offline);   // Spectral: find the voice's copy; false = not yet
     void noteOff(int note);
     void allOff();
     void startRelease(Voice& v);
@@ -71,6 +84,7 @@ private:
     void takePending();
 
     double hostRate_ = 48000.0;
+    SpectralBank* bank_ = nullptr;
     std::array<Voice, 24> voices_;
     juce::uint32 ageCounter_ = 0;
     bool sustainPedal_ = false;

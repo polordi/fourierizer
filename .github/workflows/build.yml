@@ -71,6 +71,12 @@ jobs:
         shell: bash
         run: ctest --test-dir build/release/core --output-on-failure
 
+      - name: Sampler test (Tape vs Spectral, offline and real time)
+        shell: bash
+        run: |
+          t=$(find build/release/plugin -type f \( -name 'FourierizerSamplerTest' -o -name 'FourierizerSamplerTest.exe' \) | head -1)
+          "$t"
+
       - name: Download pluginval
         shell: bash
         run: |

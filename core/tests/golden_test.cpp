@@ -16,6 +16,7 @@
 #include "fourierizer/ops.h"
 #include "fourierizer/render.h"
 #include "fourierizer/resample.h"
+#include "fourierizer/spectral.h"
 #include "fourierizer/spectrogram.h"
 #include "fourierizer/stft.h"
 #include "fourierizer/windows.h"
@@ -245,6 +246,32 @@ void testProperties() {
     check(up.size() == x.size() / 2, "+12 st halves the length");
 }
 
+void testSpectral() {
+    std::puts("spectral pitch shift");
+    const json g = load("spectral.json");
+    const Channels x = channelsOf(g["x"]);
+    std::mt19937 rng(3);
+    for (auto& c : g["cases"]) {
+        const double st = c["semitones"];
+        const int n = c["n"], chans = c["channels"];
+        const Channels xs(x.begin(), x.begin() + chans);
+        const Channels y = spectralPitch(xs, st, n);
+        double d = 0;
+        for (int ch = 0; ch < chans; ++ch) d = std::max(d, maxAbsDiff(y[ch], c["y"][ch]));
+        // the same numbers in random chunks (how the sampler streams it)
+        SpectralShifter s(std::make_shared<const Channels>(xs), st, n);
+        Channels all(chans), part;
+        while (!s.done()) {
+            s.process(1 + rng() % 700, part);
+            for (int ch = 0; ch < chans; ++ch) all[ch].insert(all[ch].end(), part[ch].begin(), part[ch].end());
+        }
+        char label[128];
+        std::snprintf(label, sizeof label, "%+.1f st N=%d: max diff %.2e, chunked output identical", st, n, d);
+        // 1e-7: phases travel through quiet bins (see ui/test/engine.test.ts); chunking is exact.
+        check(d < 1e-7 && all == y, label);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -256,6 +283,7 @@ int main() {
         testRender();
         testResample();
         testOps();
+        testSpectral();
         testSpectrogram();
         testProperties();
     } catch (const std::exception& e) {

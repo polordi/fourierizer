@@ -1,5 +1,6 @@
-// Browser sampler for the demo: plays the rendered result polyphonically in Tape mode
-// (playback rate 2^((note − root)/12)) with an ADSR per voice. In the plugin this is the C++
+// Browser sampler for the demo: plays the rendered result polyphonically with an ADSR per voice.
+// Tape mode reads it at rate 2^((note − root)/12); Spectral mode plays a pitch-shifted copy of
+// the same length (computed by the worker, see BrowserHost). In the plugin this is the C++
 // sampler on the audio thread; the UI only sends notes and parameters.
 
 interface Voice { src: AudioBufferSourceNode; gain: GainNode; start: number; rate: number; note: number; }
@@ -13,6 +14,11 @@ export class Sampler {
   private master: GainNode | null = null;
   private voices: Voice[] = [];
   root = 48;
+  mode: "tape" | "spectral" = "tape";
+  /** Spectral copies: a buffer now, or a promise when it is still being computed. */
+  shifted: ((shift: number) => AudioBuffer | Promise<AudioBuffer | null>) | null = null;
+  private waiting = new Map<number, number>();   // note → token of a note waiting for its copy
+  private tokens = 0;
   env: Envelope = { a: 0.06, d: 0.45, s: 0.7, r: 0.8 };
   onActivity: (() => void) | null = null;
 
@@ -40,18 +46,42 @@ export class Sampler {
     this.buffer = b;
   }
 
+  /** An AudioBuffer from channel data (needs the AudioContext). */
+  makeBuffer(channels: Float32Array[], sr: number): AudioBuffer {
+    const b = this.ensure().createBuffer(channels.length, channels[0].length, sr);
+    channels.forEach((c, i) => b.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+    return b;
+  }
+
   noteOn(note: number, velocity = 0.9): void {
-    const ctx = this.ensure();
+    this.ensure();
     if (!this.buffer || !this.master) return;
+    if (this.mode === "spectral" && note !== this.root && this.shifted) {
+      const shift = Math.max(-48, Math.min(48, note - this.root)), got = this.shifted(shift);
+      if (got instanceof AudioBuffer) { this.startVoice(got, 1, note, velocity); return; }
+      const token = ++this.tokens;
+      this.waiting.set(note, token);
+      void got.then((b) => {
+        if (this.waiting.get(note) !== token) return;   // released (or replayed) meanwhile
+        this.waiting.delete(note);
+        if (b) this.startVoice(b, 1, note, velocity);
+      });
+      return;
+    }
+    this.startVoice(this.buffer, this.mode === "spectral" ? 1 : 2 ** ((note - this.root) / 12), note, velocity);
+  }
+
+  private startVoice(buffer: AudioBuffer, rate: number, note: number, velocity: number): void {
+    const ctx = this.ctx!;
     if (this.voices.length >= 24) this.release(this.voices[0], ctx.currentTime);
-    const now = ctx.currentTime, rate = 2 ** ((note - this.root) / 12);
+    const now = ctx.currentTime;
     const src = ctx.createBufferSource(), gain = ctx.createGain();
-    src.buffer = this.buffer; src.playbackRate.value = rate;
+    src.buffer = buffer; src.playbackRate.value = rate;
     const { a, d, s } = this.env, peak = velocity;
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(peak, now + a);
     gain.gain.setTargetAtTime(peak * s, now + a, Math.max(0.001, d / 3));
-    src.connect(gain).connect(this.master);
+    src.connect(gain).connect(this.master!);
     src.start(now);
     const v: Voice = { src, gain, start: now, rate, note };
     src.onended = () => { this.voices = this.voices.filter((x) => x !== v); this.onActivity?.(); };
@@ -60,12 +90,13 @@ export class Sampler {
   }
 
   noteOff(note: number): void {
+    this.waiting.delete(note);
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     for (const v of this.voices) if (v.note === note && !(v as Voice & { off?: boolean }).off) this.release(v, now);
   }
 
-  allOff(): void { if (this.ctx) for (const v of this.voices) this.release(v, this.ctx.currentTime); }
+  allOff(): void { this.waiting.clear(); if (this.ctx) for (const v of this.voices) this.release(v, this.ctx.currentTime); }
 
   private release(v: Voice, now: number): void {
     (v as Voice & { off?: boolean }).off = true;

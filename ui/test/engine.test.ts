@@ -117,3 +117,18 @@ test("spectrogram puts a 1 kHz tone on the right row", () => {
   const y = (bestRow + 0.5) / img.rows, f = 30 * (20000 / 30) ** (1 - y);
   assert.ok(Math.abs(Math.log2(f / 1000)) < 0.03, `peak at ${f} Hz`);
 });
+
+// Tolerance 1e-7, not 1e-9: phases are carried from frame to frame, also through quiet bins
+// whose phase has a large relative rounding error; when such a bin gets loud (the noise burst)
+// that error is scaled by its new level. Measured: ~4e-10 here, ~7e-10 in C++.
+test("spectral pitch shift matches spectral_pitch", async () => {
+  const { spectralPitch } = await import("../src/dsp/spectral.ts");
+  const g = load("spectral.json");
+  for (const c of g.cases) {
+    const y = spectralPitch(g.x.slice(0, c.channels), c.semitones, c.n);
+    for (let ch = 0; ch < y.length; ch++) {
+      const d = maxAbsDiff(y[ch], c.y[ch]);
+      assert.ok(d < 1e-7, `${c.semitones} st, N=${c.n}: max diff ${d}`);
+    }
+  }
+});

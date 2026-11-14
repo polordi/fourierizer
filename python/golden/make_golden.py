@@ -18,6 +18,7 @@ from fourierizer_ref.mask import Rect, Polygon, Selection          # noqa: E402
 from fourierizer_ref.render import Layer, render                   # noqa: E402
 from fourierizer_ref.audio import resample_by_step                 # noqa: E402
 from fourierizer_ref.ops import OpLayer, render_op                 # noqa: E402
+from fourierizer_ref.spectral import spectral_pitch                # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "data"
 SR = 8000
@@ -125,6 +126,18 @@ def main() -> None:
                   for op, a, b in [("max", 0, 1), ("cross", 0, 1), ("cross", 2, 0), ("product", 1, 2)]],
     }
     (OUT / "ops.json").write_text(json.dumps(op_doc))
+
+    # Spectral pitch shift: a harmonic tone with a noise burst and a silent gap (phase reset).
+    ns = 2400
+    ts = np.arange(ns) / SR
+    tone = sum(0.3 / h * np.sin(2 * np.pi * 233.0 * h * ts + h) for h in range(1, 6))
+    tone[900:1100] += 0.4 * rng.standard_normal(200)
+    tone[1500:1800] = 0.0
+    xs = np.stack([tone, 0.7 * np.roll(tone, 23) + 0.1 * np.sin(2 * np.pi * 1300 * ts)])
+    spectral_doc = {"x": [arr(c) for c in xs], "cases": [
+        {"semitones": st, "n": nfft, "channels": ch, "y": [arr(c) for c in spectral_pitch(xs[:ch], st, nfft)]}
+        for st, nfft, ch in [(7, 256, 2), (-5, 512, 1), (12, 256, 2), (3.5, 128, 1), (-19, 256, 2)]]}
+    (OUT / "spectral.json").write_text(json.dumps(spectral_doc))
     print("golden files written to", OUT)
 
 

@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "SpectralBank.h"
+
 namespace fzp {
 
 Sampler::Sampler() = default;
@@ -82,7 +84,7 @@ void Sampler::uiAllOff() {
 }
 
 // ------------------------------------------------------------------------------ voices
-void Sampler::noteOn(int note, float velocity, int root) {
+void Sampler::noteOn(int note, float velocity, int root, bool spectral) {
     if (current_ == nullptr || current_->audio.getNumSamples() == 0) return;
     Voice* v = nullptr;
     for (auto& c : voices_)
@@ -100,9 +102,33 @@ void Sampler::noteOn(int note, float velocity, int root) {
     v->level = 0;
     v->pos = 0;
     v->t = 0;
-    v->buffer = current_;
-    v->step = std::pow(2.0, (note - root) / 12.0) * current_->sampleRate / hostRate_;
     v->age = ++ageCounter_;
+    v->waiting = false;
+    if (spectral && bank_ != nullptr && note != root) {
+        v->shift = juce::jlimit(-SpectralBank::kMaxShift, SpectralBank::kMaxShift, note - root);
+        v->buffer = nullptr;
+        v->step = current_->sampleRate / hostRate_;
+        v->waiting = !attach(*v, false);
+        return;
+    }
+    v->shift = 0;
+    v->buffer = current_;
+    v->step = (spectral ? 1.0 : std::pow(2.0, (note - root) / 12.0)) * current_->sampleRate / hostRate_;
+}
+
+// The voice's spectral copy, or false if it does not exist yet (it has been requested). When the
+// host renders offline we may wait for it: the bounce must not depend on how fast the CPU is.
+bool Sampler::attach(Voice& v, bool offline) {
+    SampleBuffer::Ptr b;
+    for (int tries = 0; tries < 10000; ++tries) {
+        if (bank_->lookup(v.shift, b) && b != nullptr) {
+            v.buffer = b;
+            return true;
+        }
+        if (!offline) return false;
+        juce::Thread::sleep(1);
+    }
+    return false;
 }
 
 void Sampler::startRelease(Voice& v) {
@@ -154,7 +180,8 @@ static inline float hermite(const float* x, int n, double pos) {
     return ((c3 * f + c2) * f + c1) * f + x0;
 }
 
-void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Envelope& env, int root, float gain) {
+void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Envelope& env, int root, float gain,
+                      bool spectral, bool offline) {
     takePending();
     if (stopPreviewFlag_.exchange(false) && preview_.active) preview_.stopping = true;
 
@@ -163,7 +190,7 @@ void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& mid
     auto apply = [&](int start, int size) {
         for (int k = 0; k < size; ++k) {
             const auto& e = fifoData_[(size_t) (start + k)];
-            if (e.type == 0) noteOn(e.note, e.velocity, root);
+            if (e.type == 0) noteOn(e.note, e.velocity, root, spectral);
             else if (e.type == 1) noteOff(e.note);
             else allOff();
         }
@@ -176,10 +203,25 @@ void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& mid
     auto renderSpan = [&](int from, int to) {
         for (auto& v : voices_) {
             if (!v.active) continue;
+            if (v.waiting) {
+                if (v.released) { v.active = false; continue; }   // let go before its sound was ready
+                if (!attach(v, offline)) continue;
+                v.waiting = false;
+            }
             const auto& a = v.buffer->audio;
             const int len = a.getNumSamples(), bc = a.getNumChannels();
+            int ready = v.buffer->ready.load(std::memory_order_acquire);
             for (int s = from; s < to && v.active; ++s) {
                 if (v.pos >= len) { v.active = false; v.buffer = nullptr; break; }
+                if (ready < len && (int) v.pos + 3 > ready) {   // a spectral copy still being computed
+                    if (v.buffer->abandoned.load()) { v.active = false; v.buffer = nullptr; break; }
+                    if (!offline) break;                         // resume next block
+                    for (int k = 0; k < 10000 && (int) v.pos + 3 > ready && ready < len; ++k) {
+                        juce::Thread::sleep(1);
+                        ready = v.buffer->ready.load(std::memory_order_acquire);
+                    }
+                    if (ready < len && (int) v.pos + 3 > ready) break;
+                }
                 const float g = envelopeStep(v, env, dt) * v.velocity * gain;
                 if (!v.active) break;
                 for (int c = 0; c < chans; ++c)
@@ -214,7 +256,7 @@ void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& mid
         renderSpan(cursor, at);
         cursor = at;
         const auto m = meta.getMessage();
-        if (m.isNoteOn()) noteOn(m.getNoteNumber(), m.getFloatVelocity(), root);
+        if (m.isNoteOn()) noteOn(m.getNoteNumber(), m.getFloatVelocity(), root, spectral);
         else if (m.isNoteOff()) noteOff(m.getNoteNumber());
         else if (m.isAllNotesOff() || m.isAllSoundOff()) allOff();
         else if (m.isSustainPedalOn()) sustainPedal_ = true;
@@ -230,7 +272,7 @@ void Sampler::process(juce::AudioBuffer<float>& out, const juce::MidiBuffer& mid
     const Voice* newest = nullptr;
     int count = 0;
     for (const auto& v : voices_)
-        if (v.active) {
+        if (v.active && !v.waiting) {
             ++count;
             if (newest == nullptr || v.age > newest->age) newest = &v;
         }

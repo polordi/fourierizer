@@ -1,7 +1,7 @@
 // Fourierizer UI entry point. Builds the window, owns the project state and talks to its
 // environment through `Host`: BrowserHost in the demo, PluginHost inside the plugin.
 
-import { BrowserHost, type Host, type ResultInfo, type SamplerParams, type SourceInfo } from "./host.ts";
+import { BrowserHost, type Host, type PlayState, type ResultInfo, type SamplerParams, type SourceInfo } from "./host.ts";
 import { PluginHost, insidePlugin } from "./plugin-host.ts";
 import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
@@ -301,7 +301,28 @@ class App implements LayerHost {
   }
 
   // ------------------------------------------------------------------ sampler
-  private samplerParams(): SamplerParams { return { ...this.st.adsr, root: this.st.root }; }
+  private samplerParams(): SamplerParams { return { ...this.st.adsr, root: this.st.root, mode: this.st.keytrack, window: this.st.spectralWindow }; }
+
+  private prepBar!: HTMLElement;
+  private windowOpts: HTMLButtonElement[] = [];
+  private tapeNote!: HTMLElement;
+  private keytrackSub!: HTMLElement;
+  private keytrackSeg: { refresh(): void } | null = null;
+  private syncKeytrack(): void {
+    const spectral = this.st.keytrack === "spectral";
+    this.keytrackSub.classList.toggle("spectral", spectral);
+    this.windowOpts.forEach((b) => b.setAttribute("aria-checked", String(b.textContent!.toLowerCase() === this.st.spectralWindow)));
+    this.keytrackSeg?.refresh();
+    this.showPrep(this.host.playState());
+  }
+  private showPrep(s: PlayState): void {
+    const total = s.spectralTotal ?? 0, ready = s.spectralReady ?? 0;
+    const busy = this.st.keytrack === "spectral" && total > 0 && ready < total;
+    this.prepBar.style.width = busy ? `${(100 * ready) / total}%` : "0";
+    this.prepBar.parentElement!.title = busy ? `${HELP.spectral}
+
+Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
+  }
   private pushSampler(): void { this.host.setSampler(this.samplerParams()); }
 
   private audition(): void {
@@ -429,9 +450,24 @@ class App implements LayerHost {
     // sampler module
     const keytrack = new Segmented("Keytrack", [
       { id: "tape", label: "Tape", title: HELP.tape },
-      { id: "spectral", label: "Spectral", disabled: true, title: HELP.spectral },
-    ], () => this.st.keytrack, (id) => { this.st.keytrack = id as "tape"; });
+      { id: "spectral", label: "Spectral", title: HELP.spectral },
+    ], () => this.st.keytrack, (id) => { this.st.keytrack = id as "tape" | "spectral"; this.syncKeytrack(); this.pushSampler(); });
     keytrack.el.dataset.tip = HELP.keytrack;
+    this.keytrackSeg = keytrack;
+    keytrack.el.classList.add("ktrack");
+    // Spectral: which window, and how many notes of the octave around the root are ready
+    this.prepBar = h("span", { class: "prep", "aria-hidden": "true" });
+    keytrack.el.querySelectorAll(".seg-opt")[1].append(this.prepBar);
+    this.windowOpts = (["tonal", "mixed", "punchy"] as const).map((w) => {
+      const b = h("button", { class: "wopt", type: "button", role: "radio" }, w[0].toUpperCase() + w.slice(1));
+      b.addEventListener("click", () => { this.st.spectralWindow = w; this.syncKeytrack(); this.pushSampler(); });
+      return b;
+    });
+    this.tapeNote = h("span", { class: "ro-sm" }, "Higher keys play shorter");
+    const windowRow = h("div", { class: "wopts", role: "radiogroup", "aria-label": "Spectral window" }, ...this.windowOpts);
+    windowRow.dataset.tip = HELP.spectralWindow;
+    this.keytrackSub = h("div", { class: "ktsub" }, this.tapeNote, windowRow);
+    keytrack.el.append(this.keytrackSub);
     this.rootStep = new Stepper({
       label: "Root", display: () => noteName(this.st.root), derived: () => `MIDI ${this.st.root} · ${(440 * 2 ** ((this.st.root - 69) / 12)).toFixed(1)} Hz`,
       canStep: (d) => d > 0 ? this.st.root < 127 : this.st.root > 0,
@@ -452,7 +488,7 @@ class App implements LayerHost {
       h("div", { class: "row" }, keytrack.el, this.rootStep.el, h("span", { class: "grow" }),
         h("div", { style: "display:grid;gap:6px;justify-items:end" }, this.midiKey, this.keysEl)),
       h("div", { class: "knobs" }, kA.el, kD.el, kS.el, kR.el));
-    this.refreshers.push(keytrack);
+    this.refreshers.push(keytrack, { refresh: () => this.syncKeytrack() });
 
     // mix
     const faders = [0, 1, 2, 3].map((i) => new Fader(`L${i + 1}`, `fz-l${i + 1}`, () => this.st.layers[i].levelDb, (db) => { this.st.layers[i].levelDb = db; this.scheduleRender(); }, HELP.level));
@@ -463,7 +499,9 @@ class App implements LayerHost {
     this.syncOp();
     this.updateKeys();
     this.setResult(null);
-    this.pushSampler();
+    // The plugin's parameters live in the host (saved with the project): the UI reads them in
+    // restore() and must not overwrite them with its defaults when the window opens.
+    if (!plugin) this.pushSampler();
 
     new ResizeObserver(() => this.layout(false)).observe(this.layersEl);
     this.layout(false);
@@ -481,6 +519,9 @@ class App implements LayerHost {
   private applySamplerParams(p: SamplerParams): void {
     this.st.adsr = { a: p.a, d: p.d, s: p.s, r: p.r };
     this.st.root = p.root;
+    if (p.mode) this.st.keytrack = p.mode;
+    if (p.window) this.st.spectralWindow = p.window;
+    this.syncKeytrack();
     this.knobs.forEach((k) => k.refresh());
     this.rootStep.refresh();
   }
@@ -507,6 +548,7 @@ class App implements LayerHost {
     if (this.raf) return;
     const tick = () => {
       const s = this.host.playState();
+      this.showPrep(s);
       if (this.previewShown >= 0 && s.preview !== this.previewShown && this.previewWanted < 0) {
         this.views[this.previewShown].setPreviewing(false);   // the preview ended on its own
         this.previewShown = -1;
@@ -514,7 +556,8 @@ class App implements LayerHost {
       if (s.preview >= 0) this.views[s.preview].setPlayhead(s.previewPos);
       if (s.result < 0) this.playheadEl.style.display = "none";
       else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${s.result * 100}%`; }
-      if (s.result < 0 && s.voices === 0 && s.preview < 0 && this.previewWanted < 0 && this.previewShown < 0) { this.raf = 0; return; }
+      const preparing = this.st.keytrack === "spectral" && (s.spectralReady ?? 0) < (s.spectralTotal ?? 0);
+      if (s.result < 0 && s.voices === 0 && s.preview < 0 && this.previewWanted < 0 && this.previewShown < 0 && !preparing) { this.raf = 0; return; }
       this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);
@@ -617,7 +660,11 @@ class App implements LayerHost {
       l.loaded = !!info;
       if (info) { l.name = info.name; l.samples = info.samples; l.channels = info.channels; }
     });
-    if (r.params) { next.adsr = { a: r.params.a, d: r.params.d, s: r.params.s, r: r.params.r }; next.root = r.params.root; }
+    if (r.params) {
+      next.adsr = { a: r.params.a, d: r.params.d, s: r.params.s, r: r.params.r }; next.root = r.params.root;
+      if (r.params.mode) next.keytrack = r.params.mode;
+      if (r.params.window) next.spectralWindow = r.params.window;
+    }
     next.display = { ...DEFAULT_DISPLAY, ...next.display };
     this.st = next;
     setAxis(axisOf(this.st.display));

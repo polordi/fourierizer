@@ -6,6 +6,7 @@ import { tapePitch } from "./dsp/resample.ts";
 import { synthesizeLayer, mix, peakOf } from "./dsp/render.ts";
 import { renderOp, type Op } from "./dsp/ops.ts";
 import { spectrogramImage } from "./dsp/spectrogram.ts";
+import { spectralPitch } from "./dsp/spectral.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { Grid } from "./dsp/stft.ts";
 import type { WorkerRequest } from "./protocol.ts";
@@ -14,6 +15,7 @@ const ctx = self as unknown as { postMessage(m: unknown, t?: Transferable[]): vo
 
 const sources = new Map<number, Float32Array[]>();
 const pitched = new Map<string, Float64Array[]>();
+let lastResult: Float64Array[] = [];   // the last render, for Spectral mode
 
 function pitchedSource(id: number, st: number): Float64Array[] {
   const key = `${id}:${st}`;
@@ -80,12 +82,18 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
           const list = msg.op === "max" ? all.filter((l) => l) : all;
           out = renderOp(list as never, msg.op as Exclude<Op, "sum">, msg.sr, msg.a, msg.b);
         }
+        lastResult = out;
         const peakLin = peakOf(out);
         const chans = out.map((c) => Float32Array.from(c));
         const img = chans.length && chans[0].length ? spectrogramImage(mid(chans), msg.sr, RESULT_GRID, 1400, 300, msg.axis) : null;
         const transfer: Transferable[] = chans.map((c) => c.buffer);
         if (img) transfer.push(img.data.buffer);
         ctx.postMessage({ type: "render", req: msg.req, channels: chans, peak: peakLin, ms: performance.now() - t0, image: img }, transfer);
+        break;
+      }
+      case "shift": {
+        const y = lastResult.length && lastResult[0].length ? spectralPitch(lastResult, msg.semitones, msg.n).map((c) => Float32Array.from(c)) : [];
+        ctx.postMessage({ type: "shift", req: msg.req, channels: y }, y.map((c) => c.buffer));
         break;
       }
       case "layer": {

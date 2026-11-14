@@ -39,7 +39,7 @@ template <typename F>
 void run(juce::ThreadPool& pool, const juce::String& name, F f) { pool.addJob(new LambdaJob<F>(name, std::move(f)), true); }
 } // namespace
 
-Engine::Engine(Sampler& sampler) : sampler_(sampler) {
+Engine::Engine(Sampler& sampler, SpectralBank& bank) : sampler_(sampler), bank_(bank) {
     formats_.registerBasicFormats();
     resultWav_ = juce::File::getSpecialLocation(juce::File::tempDirectory)
                      .getChildFile(tempFolderName())
@@ -171,6 +171,7 @@ void Engine::clearResult() {
         lastRequest_ = juce::var();
     }
     sampler_.setResult(nullptr);
+    bank_.setSource(nullptr, nullptr);
     resultWav_.deleteFile();
 }
 
@@ -289,18 +290,21 @@ void Engine::runRender(const juce::var& request, std::shared_ptr<std::atomic<boo
         buf->audio.setSize(2, n);
         for (int c = 0; c < 2; ++c)
             for (int i = 0; i < n; ++i) buf->audio.setSample(c, i, (float) y[(size_t) std::min<size_t>((size_t) c, y.size() - 1)][(size_t) i]);
-        sampler_.setResult(n > 0 && peak > 0 ? buf : nullptr);
+        const bool audible = n > 0 && peak > 0;
+        auto shared = std::make_shared<const fz::Channels>(std::move(y));
+        sampler_.setResult(audible ? buf : nullptr);
+        bank_.setSource(audible ? shared : nullptr, audible ? buf : nullptr);
 
         juce::var image;
         if (n > 0) {
-            const auto img = fz::spectrogramImage(fz::midOf(y), kProjectRate, kResultGrid, 1400, 300, axisOf(request["axis"]));
+            const auto img = fz::spectrogramImage(fz::midOf(*shared), kProjectRate, kResultGrid, 1400, 300, axisOf(request["axis"]));
             image = obj({{"key", putBlob("result", toBytes(img.data))}, {"cols", img.cols}, {"rows", img.rows}});
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         auto info = obj({{"peak", peak}, {"ms", ms}, {"duration", n / kProjectRate}, {"image", image}});
         {
             std::lock_guard lock(mutex_);
-            result_ = std::make_shared<const fz::Channels>(std::move(y));
+            result_ = shared;
             resultInfo_ = info;
         }
         if (n > 0 && peak > 0) writeResultWav(resultWav_);
@@ -465,7 +469,10 @@ juce::ValueTree Engine::loadState(const void* data, int size) {
     setProject(root["project"].toString());
     const auto request = juce::JSON::parse(root["request"].toString());
     if (request.isObject()) render(request, {});
-    else sampler_.setResult(nullptr);
+    else {
+        sampler_.setResult(nullptr);
+        bank_.setSource(nullptr, nullptr);
+    }
     return params;
 }
 

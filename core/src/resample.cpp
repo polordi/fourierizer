@@ -30,28 +30,33 @@ const std::vector<double>& kernelTable() {
 }
 } // namespace
 
-std::vector<double> resampleByStep(const std::vector<double>& x, double step) {
+double resampleReach(double fc) { return kZeroCrossings / fc; }
+
+double resampleAt(const double* data, long long base, long long first, long long last, double pos, double fc,
+                  double divisor) {
     const auto& t = kernelTable();
+    const double reach = kZeroCrossings / fc;
+    const long long tableLast = static_cast<long long>(t.size()) - 1;
+    const long long k0 = std::max(first, static_cast<long long>(std::ceil(pos - reach)));
+    const long long k1 = std::min(last, static_cast<long long>(std::floor(pos + reach)));
+    double acc = 0;
+    for (long long k = k0; k <= k1; ++k) {
+        const double v = std::abs(pos - k) * fc * kSteps;
+        const long long i = static_cast<long long>(v);
+        if (i >= tableLast) continue;
+        const double f = v - i;
+        const double xk = divisor == 1.0 ? data[k - base] : data[k - base] / divisor;
+        acc += xk * (t[i] + (t[i + 1] - t[i]) * f);
+    }
+    return acc * fc;
+}
+
+std::vector<double> resampleByStep(const std::vector<double>& x, double step) {
     const long long n = static_cast<long long>(x.size());
     const double fc = std::min(1.0, 1.0 / step);
-    const double reach = kZeroCrossings / fc;
     const long long outLen = static_cast<long long>(std::ceil(n / step));
-    const long long tableLast = static_cast<long long>(t.size()) - 1;
     std::vector<double> y(std::max(outLen, 0LL), 0.0);
-    for (long long j = 0; j < outLen; ++j) {
-        const double pos = j * step;
-        const long long k0 = std::max(0LL, static_cast<long long>(std::ceil(pos - reach)));
-        const long long k1 = std::min(n - 1, static_cast<long long>(std::floor(pos + reach)));
-        double acc = 0;
-        for (long long k = k0; k <= k1; ++k) {
-            const double v = std::abs(pos - k) * fc * kSteps;
-            const long long i = static_cast<long long>(v);
-            if (i >= tableLast) continue;
-            const double f = v - i;
-            acc += x[k] * (t[i] + (t[i + 1] - t[i]) * f);
-        }
-        y[j] = acc * fc;
-    }
+    for (long long j = 0; j < outLen; ++j) y[j] = resampleAt(x.data(), 0, 0, n - 1, j * step, fc);
     return y;
 }
 

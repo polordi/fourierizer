@@ -37,17 +37,22 @@ public:
     void setStateInformation(const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState parameters;
+    fzp::SpectralBank bank;                 // declared first: the sampler and engine use it
     fzp::Sampler sampler;
-    fzp::Engine engine{sampler};
+    fzp::Engine engine{sampler, bank};
 
-    /// Knob positions (0..1) of the envelope, as in the UI, and the root note.
+    /// Knob positions (0..1) of the envelope, as in the UI, the root note, the playback mode
+    /// ("tape" / "spectral") and the spectral window ("tonal" / "mixed" / "punchy").
     juce::var samplerParams() const;
     void setSamplerParams(const juce::var& p);
 
     static fzp::Envelope envelopeFromKnobs(float a, float d, float s, float r);
 
 private:
-    void timerCallback() override { sampler.collectGarbage(); }
+    void timerCallback() override {
+        sampler.collectGarbage();
+        bank.collectGarbage();
+    }
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
     std::atomic<float>* attack_ = nullptr;
@@ -56,6 +61,8 @@ private:
     std::atomic<float>* release_ = nullptr;
     std::atomic<float>* root_ = nullptr;
     std::atomic<float>* volume_ = nullptr;
+    std::atomic<float>* mode_ = nullptr;
+    std::atomic<float>* window_ = nullptr;
     juce::SmoothedValue<float> gain_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FourierizerProcessor)

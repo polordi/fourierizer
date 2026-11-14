@@ -172,3 +172,39 @@ def test_band_selection_removes_out_of_band_energy():
     S = np.abs(np.fft.rfft(seg))
     f = np.fft.rfftfreq(SR // 2, 1 / SR)
     assert S[np.argmin(abs(f - 1000))] > 1000 * S[np.argmin(abs(f - 440))]
+
+
+# ---- Spectral pitch shift (phase vocoder + resampling) ----------------------------------------
+from fourierizer_ref.spectral import WINDOWS as SPECTRAL_WINDOWS, spectral_pitch  # noqa: E402
+
+
+def _pitch_hz(y: np.ndarray, sr: int) -> float:
+    seg = y[sr // 4: sr // 4 + 16384] * np.hanning(16384)
+    Y = np.abs(np.fft.rfft(seg))
+    k = int(np.argmax(Y))
+    a, b, c = np.log(Y[k - 1:k + 2])
+    return (k + 0.5 * (a - c) / (a - 2 * b + c)) * sr / 16384
+
+
+@pytest.mark.parametrize("semitones", [12, 7, -5, -12, 19])
+@pytest.mark.parametrize("window", sorted(SPECTRAL_WINDOWS))
+def test_spectral_pitch_keeps_length_and_level(semitones, window):
+    sr = 48000
+    t = np.arange(sr) / sr
+    x = 0.5 * np.sin(2 * np.pi * 440 * t)
+    y = spectral_pitch(x[None], semitones, SPECTRAL_WINDOWS[window])[0]
+    assert len(y) == len(x)
+    assert _pitch_hz(y, sr) == pytest.approx(440 * 2 ** (semitones / 12), rel=2e-4)
+    rms = np.sqrt(np.mean(y[sr // 8: -sr // 8] ** 2))
+    assert rms == pytest.approx(0.5 / np.sqrt(2), rel=0.02)
+
+
+def test_spectral_pitch_zero_is_identity_and_keeps_stereo_image():
+    sr = 48000
+    t = np.arange(sr // 2) / sr
+    left = 0.4 * np.sin(2 * np.pi * 300 * t)
+    x = np.stack([left, -left])                     # anti-phase: the mid signal is silent
+    assert np.array_equal(spectral_pitch(x, 0), x)
+    y = spectral_pitch(np.stack([left, 0.5 * left]), 5)
+    mid = slice(sr // 8, -sr // 8)
+    assert np.allclose(y[1][mid], 0.5 * y[0][mid], atol=1e-9)   # same rotation on both channels
