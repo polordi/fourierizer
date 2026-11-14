@@ -32,8 +32,8 @@ export interface LayerState {
 }
 
 /** How every spectrogram is drawn (the Display panel), like Wave Candy's spectrum settings. */
-export interface Display { scale: "log" | "lin"; fmin: number; fmax: number; rangeDb: number; gainDb: number; }
-export const DEFAULT_DISPLAY: Display = { scale: "log", fmin: 30, fmax: 20000, rangeDb: 58, gainDb: 0 };
+export interface Display { scale: "log" | "lin"; fmin: number; fmax: number; rangeDb: number; gainDb: number; labels: "hz" | "notes"; }
+export const DEFAULT_DISPLAY: Display = { scale: "log", fmin: 30, fmax: 20000, rangeDb: 58, gainDb: 0, labels: "hz" };
 export const LOW_HZ = [0, 20, 30, 40, 50, 80, 100, 150, 200, 300, 500, 1000];
 export const HIGH_HZ = [1000, 2000, 3000, 4000, 5000, 8000, 10000, 12000, 16000, 20000, 24000];
 /** The axis for a display (a log axis cannot start at 0 Hz). */

@@ -5,6 +5,7 @@ import { BrowserHost, type Host, type PlayState, type ResultInfo, type SamplerPa
 import { PluginHost, insidePlugin } from "./plugin-host.ts";
 import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
+import { Piano } from "./view/piano.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
 import { Fader, Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./view/controls.ts";
@@ -113,6 +114,15 @@ class App implements LayerHost {
     if (this.previewShown === i || this.previewWanted === i) this.host.setPreviewOriginal(on);
   }
   look(): Look { return { rangeDb: this.st.display.rangeDb, gainDb: this.st.display.gainDb }; }
+  labels(): "hz" | "notes" { return this.st.display.labels; }
+  root(): number { return this.st.root; }
+  /** The pianos on every axis follow the root and the display axis. */
+  private refreshPianos(): void {
+    this.views?.forEach((v) => v.refreshAxis());
+    this.resultPiano.setRoot(this.st.root);
+    this.resultPiano.draw();
+  }
+  private resultPiano = new Piano();
 
   /** Empty one slot: its sound, selections and parameters. */
   removeSound(i: number): void {
@@ -323,7 +333,7 @@ class App implements LayerHost {
 
 Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
   }
-  private pushSampler(): void { this.host.setSampler(this.samplerParams()); }
+  private pushSampler(): void { this.host.setSampler(this.samplerParams()); this.refreshPianos(); }
 
   private audition(): void {
     this.ensureAudio();
@@ -443,7 +453,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     const resultMain = h("div", { class: "main" },
       h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys),
       h("div", { class: "rhead" }, opSeg.el, this.opHint),
-      resultDisplay, this.resultAxis);
+      h("div", { class: "rbody" }, this.resultPiano.el, resultDisplay), this.resultAxis);
     const resultMod = h("section", { class: "module result", "aria-label": "Result" }, ...screws(), goCol, resultMain);
     this.refreshers.push(opSeg, segA, segB);
 
@@ -522,6 +532,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     if (p.mode) this.st.keytrack = p.mode;
     if (p.window) this.st.spectralWindow = p.window;
     this.syncKeytrack();
+    this.refreshPianos();
     this.knobs.forEach((k) => k.refresh());
     this.rootStep.refresh();
   }
@@ -679,6 +690,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     this.refreshers.forEach((x) => x.refresh());
     this.knobs.forEach((k) => k.refresh());
     this.rootStep.refresh();
+    this.refreshPianos();
     this.layout(false);
     this.views.forEach((v, i) => { v.clearSpectrogram(); v.refresh(); if (this.st.layers[i].loaded) void this.requestSpectrogram(i); });
     if (r.result && r.result.duration > 0) this.showResult(r.result);
@@ -697,6 +709,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
       this.views.forEach((v, i) => { v.refresh(); if (this.st.layers[i].loaded) void this.requestSpectrogram(i); });
       if (this.result) this.host.resultImage(getAxis()).then((img) => { if (img && this.result) { this.resultImg = img; paintSpectrogram(this.resultCanvas, img, 0, this.look()); } }).catch(() => { });
       this.displayRefresh.forEach((x) => x.refresh());
+      this.refreshPianos();
     };
     const lookChanged = () => {
       this.views.forEach((v) => v.repaint());
@@ -704,6 +717,8 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     };
     const scale = new Segmented("Scale", [{ id: "log", label: "Log", title: HELP.scale }, { id: "lin", label: "Lin", title: HELP.scale }],
       () => d().scale, (id) => { d().scale = id as "log" | "lin"; axisChanged(); });
+    const labels = new Segmented("Labels", [{ id: "hz", label: "Hz", title: HELP.labels }, { id: "notes", label: "Notes", title: HELP.labels }],
+      () => d().labels, (id) => { d().labels = id as "hz" | "notes"; this.refreshPianos(); });
     const hz = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(f));
     const listStep = (label: string, list: number[], get: () => number, set: (v: number) => void, ok: (v: number) => boolean, tip: string) => new Stepper({
       label, display: () => hz(get()), derived: () => "Hz", tip,
@@ -722,8 +737,8 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
       [range, gain].forEach((k) => k.refresh());
       lookChanged(); axisChanged();
     });
-    this.displayRefresh.push(scale, low, high, range, gain);
-    panel.append(h("div", { class: "row" }, scale.el, low.el, high.el), h("div", { class: "row" }, range.el, gain.el, h("span", { class: "grow" }), reset));
+    this.displayRefresh.push(scale, low, high, range, gain, labels);
+    panel.append(h("div", { class: "row" }, scale.el, low.el, high.el), h("div", { class: "row" }, labels.el, range.el, gain.el, h("span", { class: "grow" }), reset));
     const button = key("Display", ICONS.display, { class: "sm", "aria-expanded": "false", title: HELP.display }, () => {
       panel.hidden = !panel.hidden;
       button.setAttribute("aria-pressed", String(!panel.hidden));

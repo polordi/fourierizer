@@ -150,13 +150,14 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .lname { min-width: 0; flex: 0 1 auto; font: 600 16px/20px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lbody { position: relative; flex: 1; min-height: 0; }
 .yax { position: absolute; left: 0; top: 0; width: var(--axw); bottom: var(--xh); transition: width var(--morph) var(--spring), bottom var(--morph) var(--spring); }
-.yax span { position: absolute; right: 4px; transition: opacity 300ms ease; }
+.yax span { position: absolute; right: calc(var(--pw) + 4px); transition: opacity 300ms ease; }
+.yax .piano { position: absolute; right: 0; top: 0; bottom: 0; width: var(--pw); height: 100%; border-radius: 2px 0 0 2px; transition: width var(--morph) var(--spring); }
 .lm .display { position: absolute; top: 0; right: 0; left: var(--axw); bottom: var(--xh); transition: left var(--morph) var(--spring), bottom var(--morph) var(--spring); }
 .xax { position: absolute; left: var(--axw); right: 0; bottom: 0; height: 14px; }
 .xax span, .rx span { position: absolute; top: 0; }
-.mode-grid { --axw: 28px; --xh: 0px; padding: 14px 18px; }
-.mode-editor { --axw: 38px; --xh: 18px; padding: 16px 20px; }
-.mode-rail { --axw: 0px; --xh: 0px; padding: 10px 12px; }
+.mode-grid { --axw: 36px; --pw: 8px; --xh: 0px; padding: 14px 18px; }
+.mode-editor { --axw: 52px; --pw: 12px; --xh: 18px; padding: 16px 20px; }
+.mode-rail { --axw: 0px; --pw: 0px; --xh: 0px; padding: 10px 12px; }
 .mode-grid .yax .minor, .mode-rail .yax span { opacity: 0; }
 .mode-rail .lname { font-size: 14px; flex: 1; }
 .actions, .edit-only { display: flex; align-items: center; gap: 10px; }
@@ -181,7 +182,10 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .result .go-col { width: 168px; flex: none; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
 .result .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .result .rhead { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.result .rbody { flex: 1; min-height: 0; display: flex; }
+.result .rbody .piano { width: 10px; flex: none; margin-right: 0; border-radius: 2px 0 0 2px; }
 .result .display { flex: 1; cursor: pointer; }
+.result .rx { margin-left: 10px; }
 .playhead { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--ink); left: 0; display: none; pointer-events: none; }
 .rx { position: relative; height: 12px; }
 .leds { display: flex; gap: 8px; align-items: center; }

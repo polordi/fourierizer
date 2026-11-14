@@ -5,6 +5,7 @@ import { h, icon, s, ICONS, screws } from "./dom.ts";
 import { Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./controls.ts";
 import { HELP, HOW, tip } from "./help.ts";
 import { freqToY, yToFreq, getAxis, level, type Look } from "../dsp/spectrogram.ts";
+import { Piano, noteFreq, noteOf } from "./piano.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
 import { F_FLOOR, envelope, rowIntervals, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
 import { SR, WINDOW_LABELS, fadeLabel, fadeToKnob, featherLabel, knobToFade, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
@@ -31,14 +32,30 @@ export interface LayerHost {
   setOriginal(i: number, on: boolean): void;
   removeSound(i: number): void;
   look(): Look;
+  /** Axis labels in Hz or as notes (C1, C2, …), and the sampler's root note (marked on the piano). */
+  labels(): "hz" | "notes";
+  root(): number;
   picked(): { layer: number; shape: number } | null;
   setPicked(p: { layer: number; shape: number } | null): void;
   ensureAudio(): void;
 }
 
-/** Frequency ticks for the current axis: decades on a log axis, round steps on a linear one. */
-function ticks(): [string, number, boolean][] {
-  const a = getAxis(), lbl = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(f));
+/** Frequency ticks for the current axis: decades on a log axis, round steps on a linear one;
+ *  or every C when the labels are notes (dropping the ones that would overlap). */
+export function ticks(labels: "hz" | "notes" = "hz"): [string, number, boolean][] {
+  const a = getAxis();
+  if (labels === "notes") {
+    const out: [string, number, boolean][] = [];
+    let last = -1;
+    for (let oct = 10; oct >= -1; oct--) {
+      const f = noteFreq(12 * (oct + 1)), y = freqToY(f);
+      if (y < 0.02 || y > 0.98 || (last >= 0 && y - last < 0.06)) continue;
+      out.push([`C${oct}`, f, true]);
+      last = y;
+    }
+    return out;
+  }
+  const lbl = (f: number) => (f >= 1000 ? `${+(f / 1000).toFixed(1)}k` : String(f));
   if (a.scale === "lin") {
     const span = a.fmax - a.fmin, step = [100, 200, 500, 1000, 2000, 2500, 5000].find((s) => span / s <= 6) ?? 5000;
     const out: [string, number, boolean][] = [];
@@ -166,6 +183,7 @@ export class LayerView {
 
     // display
     const yax = this.yax = h("div", { class: "yax", "aria-hidden": "true" });
+    this.piano = new Piano();
     this.canvas = h("canvas", { class: "spec" });
     this.svg = s("svg", { class: "ov", viewBox: "0 0 1000 1000", preserveAspectRatio: "none", role: "img", "aria-label": `Layer ${n} spectrogram and selections` });
     this.handles = h("div", { style: "position:absolute;inset:0;pointer-events:none" });
@@ -274,13 +292,18 @@ export class LayerView {
   }
 
   private yKey = "";
+  private piano: Piano;
   private drawYAxis(): void {
-    const a = getAxis(), k = `${a.scale}:${a.fmin}:${a.fmax}`;
+    const a = getAxis(), labels = this.host.labels(), k = `${a.scale}:${a.fmin}:${a.fmax}:${labels}`;
+    this.piano.setRoot(this.host.root());
     if (k === this.yKey) return;
     this.yKey = k;
-    this.yax.replaceChildren(...ticks().map(([lbl, f, major]) =>
+    this.yax.replaceChildren(this.piano.el, ...ticks(labels).map(([lbl, f, major]) =>
       h("span", { class: `ro-sm ${major ? "major" : "minor"}`, style: `top:calc(${(freqToY(f) * 100).toFixed(2)}% - 6px)` }, lbl)));
+    this.piano.draw();
   }
+  /** Redraw the axis labels and the piano (new root, labels or axis). */
+  refreshAxis(): void { this.drawYAxis(); }
 
   refreshParams(): void {
     const l = this.host.state(this.i);
@@ -583,7 +606,7 @@ export class LayerView {
     });
     this.svg.addEventListener("pointermove", (e) => {
       const [t, f] = this.toTF(e);
-      if (this.mode === "editor") this.cursor.textContent = `${t.toFixed(3)} s · ${f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : f.toFixed(0) + " Hz"}`;
+      if (this.mode === "editor") this.cursor.textContent = `${t.toFixed(3)} s · ${f >= 1000 ? (f / 1000).toFixed(2) + " kHz" : f.toFixed(0) + " Hz"} · ${noteOf(f)}`;
       if (act === "none" || !this.svg.hasPointerCapture(e.pointerId)) return;
       const p = this.rel(e), r = this.svg.getBoundingClientRect(), tool = this.host.tool();
       if (!dragged && Math.hypot((p[0] - start[0]) * r.width, (p[1] - start[1]) * r.height) < 3) return;

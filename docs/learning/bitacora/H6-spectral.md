@@ -68,3 +68,14 @@ Una barra fina dentro de la tecla *Spectral* se llena mientras se preparan las n
 5. Exporta un loop con notas lejanas al root (por ejemplo ±2 octavas) y revisa que suenen a tiempo.
 
 Plantilla de feedback: ✅ qué funciona · ❌ qué no · ➕ qué falta · ⭐ prioridad.
+
+## Ronda de feedback (2026-11-14): un piano en el eje
+
+"Tonal y Punchy están padrísimos". Lo único que faltaba: un piano en el eje vertical de cada espectrograma como referencia de notas.
+
+| Qué | En simple | En técnico |
+|---|---|---|
+| Piano en cada eje | Junto a las frecuencias de cada capa y del resultado hay un teclado: graves abajo, una raya en cada Do y la tecla del Root en azul. | [piano.ts](../../../ui/src/view/piano.ts) dibuja en un canvas cada semitono entre f(n ± ½) con el mismo `freqToY` del espectrograma, así que sigue la escala Log/Lin y el rango Low/High. |
+| Se adapta al tamaño | En vistas chicas las teclas no caben (≈ 1 px por semitono), así que solo quedan las rayas de octava y el Root; al ampliar o hacer zoom aparece el teclado completo. | *Level of detail*: la opacidad de teclas negras y separadores es clamp((h − 1.5)/3, 0, 1), donde h es la altura del semitono en píxeles. El Root se dibuja al final, con al menos 2 px. |
+| La nota bajo el cursor | En la capa ampliada, la lectura del cursor dice también la nota y cuánto se desvía: "775 Hz · G5 −21¢". | n = 69 + 12·log₂(f/440), redondeado, con la desviación en cents. |
+| Etiquetas Hz / Notes | En *Display* puedes cambiar las etiquetas del eje de Hz a octavas (C1, C2, …). Se guarda en el proyecto. | `Display.labels`; en escala lineal se omiten las etiquetas que se encimarían (separación mínima del 6 % de la altura). |
