@@ -4,7 +4,7 @@
 // served by the plugin's resource provider; audio files go up in base64 chunks.
 
 import type { Grid } from "./dsp/stft.ts";
-import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
+import type { Axis, SpectrogramImage, Analysis, AnalysisRequest } from "./dsp/spectrogram.ts";
 import type { LayerJob } from "./protocol.ts";
 import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo } from "./host.ts";
 
@@ -16,7 +16,7 @@ declare global { interface Window { __JUCE__?: { backend: JuceBackend; initialis
 
 export const insidePlugin = (): boolean => typeof window !== "undefined" && !!window.__JUCE__?.backend;
 
-interface ImageRef { key: string; cols: number; rows: number; }
+interface ImageRef { key: string; cols: number; rows: number; peakDbfs?: number; }
 type Maybe<T> = T | { error: string };
 
 const CHUNK = 1536 * 1024; // raw bytes per upload call (2 MB of base64)
@@ -66,7 +66,14 @@ export class PluginHost implements Host {
     if (!ref) return null;
     const res = await fetch(`/data/${ref.key}`);
     if (!res.ok) throw new Error(`could not fetch ${ref.key}`);
-    return { data: new Uint8Array(await res.arrayBuffer()), cols: ref.cols, rows: ref.rows };
+    return { data: new Uint8Array(await res.arrayBuffer()), cols: ref.cols, rows: ref.rows, peakDbfs: ref.peakDbfs };
+  }
+
+  async analyze(q: AnalysisRequest): Promise<Analysis | null> {
+    const r = await this.call<{ image: ImageRef; wave: string; t0: number; t1: number } | null>("analyze", q);
+    if (!r || typeof r !== "object" || !("image" in r)) return null;
+    const [image, wave] = await Promise.all([this.image(r.image), fetch(`/data/${r.wave}`).then((x) => x.arrayBuffer())]);
+    return image ? { image, wave: new Float32Array(wave), t0: r.t0, t1: r.t1 } : null;
   }
 
   private async resultInfo(r: { peak: number; ms: number; duration: number; image: ImageRef | null } | null): Promise<ResultInfo | null> {

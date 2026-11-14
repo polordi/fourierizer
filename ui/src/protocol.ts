@@ -20,7 +20,9 @@ export type WorkerRequest =
   | { type: "image"; req: number; sr: number; channels: Float32Array[]; axis: Axis }
   | { type: "layer"; req: number; sr: number; job: LayerJob }
   /** Spectral mode: the last render shifted by `semitones`, same length (window n). */
-  | { type: "shift"; req: number; semitones: number; n: number };
+  | { type: "shift"; req: number; semitones: number; n: number }
+  /** The analysis view: the last render between t0 and t1 at FFT size n. */
+  | { type: "analyze"; req: number; sr: number; axis: Axis; t0: number; t1: number; n: number; cols: number; rows: number };
 
 export interface SpectrogramReply extends SpectrogramImage { type: "spectrogram"; req: number; id: number; duration: number; }
 export interface RenderReply { type: "render"; req: number; channels: Float32Array[]; peak: number; ms: number; image: SpectrogramImage | null; }
@@ -32,6 +34,7 @@ export type WorkerReply =
   | LayerReply
   | { type: "examples"; req: number; sounds: Float32Array[] }
   | { type: "shift"; req: number; channels: Float32Array[] }
+  | { type: "analyze"; req: number; image: SpectrogramImage | null; wave: Float32Array | null; t0: number; t1: number }
   | SpectrogramReply
   | RenderReply
   | { type: "error"; req?: number; message: string };

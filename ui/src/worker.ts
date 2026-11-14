@@ -5,7 +5,7 @@ import { makeExamples } from "./dsp/examples.ts";
 import { tapePitch } from "./dsp/resample.ts";
 import { synthesizeLayer, mix, peakOf } from "./dsp/render.ts";
 import { renderOp, type Op } from "./dsp/ops.ts";
-import { spectrogramImage } from "./dsp/spectrogram.ts";
+import { analysisHop, spectrogramImage, waveformPeaks } from "./dsp/spectrogram.ts";
 import { spectralPitch } from "./dsp/spectral.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { Grid } from "./dsp/stft.ts";
@@ -89,6 +89,14 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         const transfer: Transferable[] = chans.map((c) => c.buffer);
         if (img) transfer.push(img.data.buffer);
         ctx.postMessage({ type: "render", req: msg.req, channels: chans, peak: peakLin, ms: performance.now() - t0, image: img }, transfer);
+        break;
+      }
+      case "analyze": {
+        if (!lastResult.length || !lastResult[0].length) { ctx.postMessage({ type: "analyze", req: msg.req, image: null, wave: null, t0: msg.t0, t1: msg.t1 }); break; }
+        const x = mid(lastResult), s0 = Math.round(msg.t0 * msg.sr), s1 = Math.max(s0 + 1, Math.round(msg.t1 * msg.sr));
+        const g: Grid = { window: "hann", L: msg.n, N: msg.n, H: analysisHop(s1 - s0, msg.cols, msg.n) };
+        const img = spectrogramImage(x, msg.sr, g, msg.cols, msg.rows, msg.axis, s0, s1), wave = waveformPeaks(x, s0, s1, img.cols);
+        ctx.postMessage({ type: "analyze", req: msg.req, image: img, wave, t0: msg.t0, t1: msg.t1 }, [img.data.buffer, wave.buffer]);
         break;
       }
       case "shift": {

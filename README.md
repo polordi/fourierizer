@@ -21,6 +21,8 @@ from each sound, and synthesize a brand-new sound from those selections — then
 - **Per-layer reconstruction**: each layer is resynthesized on its own time–frequency grid and summed in the time domain (no coefficient resampling).
 - **Playable result**: polyphonic sampler with *Tape* (resampling) and *Spectral* (duration-preserving) keytracking modes.
 - **Iterations**: feed a result back as a source for the next synthesis.
+- **Analysis view** of the result: detailed spectrogram with time zoom, waveform, spectrum slice, note and level readouts.
+- **VST3 and Standalone app**: use it inside a DAW or on its own (`scripts/install-standalone.ps1` installs the app on Windows).
 
 ## Repository layout
 

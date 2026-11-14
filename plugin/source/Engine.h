@@ -49,6 +49,8 @@ public:
     void spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done);
     void render(const juce::var& request, Done done);       // supersedes (cancels) the previous one
     void resultImage(const fz::Axis& axis, Done done);       // the current result on another axis
+    /// The analysis view: {axis, t0, t1, n, cols, rows} → {image: {key, cols, rows, peakDbfs}, wave: key, t0, t1}.
+    void analyze(const juce::var& request, Done done);
     void preview(const juce::var& layerJob, bool original, Done done);
 
     // ---- data the UI fetches by key through the resource provider
@@ -97,6 +99,7 @@ private:
     juce::var resultInfo_;
     std::shared_ptr<std::atomic<bool>> renderCancel_;
     juce::uint64 renderGeneration_ = 0;
+    std::atomic<juce::uint64> analyzeTicket_{0};
     juce::File resultWav_;
 };
 

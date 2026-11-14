@@ -15,9 +15,11 @@ Signal midOf(const Channels& x) {
     return m;
 }
 
-SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows, Axis axis) {
+SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows, Axis axis,
+                                  long long start0, long long end) {
     const long long n = static_cast<long long>(x.size());
-    const int M = frameCount(n, g), cols = std::max(1, std::min(M, maxCols));
+    if (end < 0) end = n;
+    const int M = frameCount(std::max(0LL, end - start0), g), cols = std::max(1, std::min(M, maxCols));
     const double fmin = axis.fmin, fmax = std::min(axis.fmax, sr / 2);
     const auto w = makeWindow(g.window, g.L);
     RealFFT fft(g.N);
@@ -34,7 +36,7 @@ SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int
     std::vector<double> acc(static_cast<size_t>(rows) * cols, 0.0);
     const int left = g.L / 2;
     for (int m = 0; m < M; ++m) {
-        const long long start = static_cast<long long>(m) * g.H - left;
+        const long long start = start0 + static_cast<long long>(m) * g.H - left;
         for (int j = 0; j < g.L; ++j) {
             const long long i = start + j;
             frame[j] = (i >= 0 && i < n) ? x[i] * w[j] : 0.0;
@@ -52,12 +54,27 @@ SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int
     const double peak = acc.empty() ? 0 : *std::max_element(acc.begin(), acc.end());
     if (peak > 0) {
         const double ref = 20 * std::log10(peak);
+        double wsum = 0;
+        for (double v : w) wsum += v;
+        img.peakDbfs = 20 * std::log10(peak * 2 / wsum);
         for (size_t i = 0; i < acc.size(); ++i) {
             const double db = 20 * std::log10(acc[i] + 1e-300) - ref;
             img.data[i] = static_cast<uint8_t>(std::clamp<long>(std::lround(-db * 2), 0, 255));
         }
     }
     return img;
+}
+
+std::vector<float> waveformPeaks(const Signal& x, long long start, long long end, int cols) {
+    std::vector<float> out(2 * static_cast<size_t>(std::max(cols, 0)), 0.0f);
+    const long long n = static_cast<long long>(x.size());
+    for (int c = 0; c < cols; ++c) {
+        const long long a = start + (end - start) * c / cols, b = std::max(a + 1, start + (end - start) * (c + 1) / cols);
+        float lo = 0, hi = 0;
+        for (long long i = std::max(0LL, a); i < std::min(n, b); ++i) { lo = std::min(lo, (float) x[i]); hi = std::max(hi, (float) x[i]); }
+        out[2 * c] = lo; out[2 * c + 1] = hi;
+    }
+    return out;
 }
 
 } // namespace fz

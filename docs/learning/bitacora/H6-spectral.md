@@ -79,3 +79,28 @@ Plantilla de feedback: ✅ qué funciona · ❌ qué no · ➕ qué falta · ⭐
 | Se adapta al tamaño | En vistas chicas las teclas no caben (≈ 1 px por semitono), así que solo quedan las rayas de octava y el Root; al ampliar o hacer zoom aparece el teclado completo. | *Level of detail*: la opacidad de teclas negras y separadores es clamp((h − 1.5)/3, 0, 1), donde h es la altura del semitono en píxeles. El Root se dibuja al final, con al menos 2 px. |
 | La nota bajo el cursor | En la capa ampliada, la lectura del cursor dice también la nota y cuánto se desvía: "775 Hz · G5 −21¢". | n = 69 + 12·log₂(f/440), redondeado, con la desviación en cents. |
 | Etiquetas Hz / Notes | En *Display* puedes cambiar las etiquetas del eje de Hz a octavas (C1, C2, …). Se guarda en el proyecto. | `Display.labels`; en escala lineal se omiten las etiquetas que se encimarían (separación mínima del 6 % de la altura). |
+
+## Ronda de feedback (2026-11-14): app sin FL y análisis del resultado
+
+**La app Standalone**
+- *En simple:* Fourierizer también es una aplicación normal. Ábrela desde el menú Inicio (**Fourierizer**) sin abrir FL. Suena por tu interfaz de audio y se toca con el MPK o con el teclado de la computadora. Al cerrarla recuerda el último proyecto.
+- *En técnico:* es el formato *Standalone* de JUCE, compilado desde H5 junto al VST3 (mismo `AudioProcessor`, mismo editor). `scripts/install-standalone.ps1` lo copia a `%LOCALAPPDATA%\Programs\Fourierizer` y crea el acceso del menú Inicio (con `-Desktop`, también en el escritorio); `build.ps1` lo corre en cada build Release. El runtime de MSVC va enlazado estáticamente, así que el `.exe` no necesita nada más.
+- **Botón *Options*** (arriba a la izquierda de la ventana):
+  - *Audio/MIDI Settings* para elegir la salida de audio y activar el MPK.
+  - *Save current state* y *Load a saved state* para guardar y abrir proyectos como archivos.
+  - *Reset to default state* para empezar de cero.
+
+**Vista de análisis del resultado**
+
+Se abre con el botón ⛶ del módulo Result, con **R** en *View* o con la tecla **5**; Esc la cierra.
+
+| Herramienta | En simple | En técnico |
+|---|---|---|
+| Espectrograma detallado | El resultado en grande, con el detalle que permite la pantalla. | Imagen de cols × rows = píxeles del área (hasta 4096 × 2048), salto ≈ un marco por columna (16 ≤ H ≤ N/4) sobre el tramo visible. Motor C++ en el plugin, *worker* en el demo. |
+| FFT 1024–8192 | Más grande separa mejor notas cercanas (armónicos, acordes). Más chica muestra mejor los golpes. Solo cambia la vista, no el sonido. | Ventana Hann de N = L con el salto anterior. |
+| Zoom y paneo | Rueda: acercar o alejar en el tiempo alrededor del cursor. Arrastrar: moverse. Doble clic o *Fit*: todo el resultado. | Mientras llega la imagen nueva, la anterior se reubica al instante en el nuevo rango. Las peticiones se agrupan (120 ms) y solo cuenta la más reciente. |
+| Lectura del cursor | Tiempo, frecuencia, nota y nivel en ese punto. | Nivel = pico − v/2 dB, con el pico expresado en dBFS: un seno a escala completa da 0 dBFS (magnitud · 2 / Σw). |
+| Corte espectral | A la derecha, el espectro en el instante del cursor (o lo más fuerte de toda la vista), con la nota del pico. | La columna de la imagen. El pico se refina entre renglones con una parábola: en el acorde de prueba da E4 −5¢ y C#4 −1¢ en vez de −12¢. |
+| Forma de onda | Debajo, el audio en el tiempo, alineado con el espectrograma. | Mínimo y máximo de la señal *mid* por columna. |
+
+El piano y las etiquetas Hz/Notes también están en esta vista, y el cabezal avanza cuando tocas notas.

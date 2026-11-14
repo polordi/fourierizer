@@ -5,7 +5,7 @@
 
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
-import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
+import type { Analysis, AnalysisRequest, Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
 import { SPECTRAL_N, type SpectralWindow } from "./dsp/spectral.ts";
 import type { LayerJob, WorkerReply, WorkerRequest } from "./protocol.ts";
 import { Sampler } from "./audio/sampler.ts";
@@ -37,6 +37,8 @@ export interface Host {
   /** The current result's display image on another axis (null without a result). */
   resultImage(axis: Axis): Promise<SpectrogramImage | null>;
   clearResult(): void;
+  /** The result's analysis view: a detailed spectrogram and waveform of a time span. */
+  analyze(req: AnalysisRequest): Promise<Analysis | null>;
   resultToLayer(i: number, name: string): Promise<SourceInfo>;
   /** Play a layer once: its selection, and in sync its original sound for A/B (`original`). */
   preview(i: number, job: LayerJob, original: boolean): Promise<{ peak: number }>;
@@ -143,6 +145,12 @@ export class BrowserHost implements Host {
     this.sampler.setResult(this.result ?? [], SR);
     this.resetBank();
     return { image: n ? r.image : null, peak: r.peak, ms: r.ms, duration: n / SR };
+  }
+
+  async analyze(q: AnalysisRequest): Promise<Analysis | null> {
+    if (!this.result) return null;
+    const r = await this.call<{ image: SpectrogramImage | null; wave: Float32Array | null; t0: number; t1: number }>({ type: "analyze", req: this.next++, sr: SR, ...q });
+    return r.image && r.wave ? { image: r.image, wave: r.wave, t0: r.t0, t1: r.t1 } : null;
   }
 
   async resultToLayer(i: number, name: string): Promise<SourceInfo> {

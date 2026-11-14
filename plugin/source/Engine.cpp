@@ -328,6 +328,32 @@ void Engine::resultImage(const fz::Axis& axis, Done done) {
     });
 }
 
+void Engine::analyze(const juce::var& q, Done done) {
+    // only the newest request matters while the user zooms and pans
+    const auto ticket = ++analyzeTicket_;
+    run(pool_, "analyze", [this, q, done, ticket] {
+        if (ticket != analyzeTicket_.load()) return done(juce::var());
+        std::shared_ptr<const fz::Channels> r;
+        {
+            std::lock_guard lock(mutex_);
+            r = result_;
+        }
+        if (r == nullptr || r->empty() || (*r)[0].empty()) return done(juce::var());
+        const double t0 = num(q["t0"]), t1 = num(q["t1"]);
+        const int n = juce::jlimit(256, 16384, (int) num(q["n"], 4096));
+        const int cols = juce::jlimit(16, 4096, (int) num(q["cols"], 1400)), rows = juce::jlimit(16, 2048, (int) num(q["rows"], 400));
+        const long long s0 = std::llround(t0 * kProjectRate), s1 = std::max(s0 + 1, std::llround(t1 * kProjectRate));
+        const int hop = std::max(16, std::min(n / 4, (int) ((s1 - s0) / cols)));
+        const auto x = fz::midOf(*r);
+        const auto img = fz::spectrogramImage(x, kProjectRate, fz::Grid{fz::Window::Hann, n, n, hop}, cols, rows, axisOf(q["axis"]), s0, s1);
+        const auto wave = fz::waveformPeaks(x, s0, s1, img.cols);
+        std::vector<std::byte> waveBytes(wave.size() * sizeof(float));
+        std::memcpy(waveBytes.data(), wave.data(), waveBytes.size());
+        done(obj({{"image", obj({{"key", putBlob("analysis", toBytes(img.data))}, {"cols", img.cols}, {"rows", img.rows}, {"peakDbfs", img.peakDbfs}})},
+                  {"wave", putBlob("analysiswave", std::move(waveBytes))}, {"t0", t0}, {"t1", t1}}));
+    });
+}
+
 void Engine::preview(const juce::var& l, bool original, Done done) {
     run(pool_, "preview", [this, l, original, done] {
         try {

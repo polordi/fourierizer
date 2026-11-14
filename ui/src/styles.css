@@ -255,3 +255,26 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .displaypanel .stepper .val { font-size: 15px; }
 .top .seg-opt { padding: 6px 8px; min-width: 40px; }
 .top .brand { margin-right: 12px; }
+
+/* Result analysis: covers the layers area. Spectrogram (with the piano axis) and spectrum slice
+   share the same rows; the waveform and the time axis sit under the spectrogram. */
+.analysis { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; --axw: 52px; --pw: 12px; }
+.analysis[hidden] { display: none; }
+.ana-head { display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; }
+.ana-head .seg-opt { min-width: 44px; padding: 5px 8px; }
+.ana-fft > .silk { display: none; }
+.ana-read { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ana-body { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--axw) minmax(0, 1fr) 210px; grid-template-rows: minmax(0, 1fr) 72px 16px; row-gap: 6px; }
+.analysis .ana-yax { position: relative; left: auto; top: auto; bottom: auto; width: auto; height: 100%; }
+.ana-specbox { position: relative; border: 1.5px solid var(--ink); background: var(--display); cursor: crosshair; overflow: hidden; touch-action: none; }
+.ana-spec { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ana-cross { position: absolute; width: 0; height: 0; pointer-events: none; display: none; }
+.ana-cross::before, .ana-cross::after { content: ""; position: absolute; background: var(--ink); opacity: 0.35; }
+.ana-cross::before { left: 0; top: -4000px; width: 1px; height: 8000px; }
+.ana-cross::after { top: 0; left: -4000px; height: 1px; width: 8000px; }
+.ana-slicebox { position: relative; margin-left: 12px; border: 1.5px solid var(--ink); background: var(--display); }
+.ana-slice { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ana-slicebox .ro-sm { position: absolute; left: 6px; top: 4px; right: 6px; background: color-mix(in srgb, var(--display) 85%, transparent); }
+.ana-wave { width: 100%; height: 100%; border: 1.5px solid var(--ink); background: var(--display); box-sizing: border-box; cursor: grab; touch-action: none; }
+.ana-wlabel { align-self: center; justify-self: end; padding-right: 6px; }
+.analysis .ana-xax { position: relative; left: auto; right: auto; bottom: auto; height: 16px; }

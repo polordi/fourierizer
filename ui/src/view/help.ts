@@ -38,6 +38,8 @@ export const HELP = {
   fresh: "New project: empty all four layers and the result. Click twice to confirm.",
   display: "How the spectrograms look: frequency scale and range, dB range (contrast) and gain (brightness). Only the picture changes, not the sound.",
   labels: "Axis labels: frequencies in Hz, or the octaves (C1, C2, …). The piano next to the axis shows every note either way; the blue key is the sampler's root.",
+  analysisFft: "FFT size of the analysis. Larger sizes separate close frequencies (harmonics, chords); smaller ones show attacks and rhythm sharply. It only changes this view, not the sound.",
+  analysis: "Analyze the result: a detailed spectrogram with zoom, the waveform and the spectrum under the cursor (5).",
   scale: "Log spreads the octaves evenly (like hearing); Lin gives every Hz the same space (like Wave Candy's linear view).",
   lowHz: "Lowest frequency shown.",
   highHz: "Highest frequency shown.",

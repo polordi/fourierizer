@@ -104,6 +104,7 @@ juce::WebBrowserComponent::Options FourierizerEditor::options() {
         .withNativeFunction("result", [&engine](Args, Completion done) { done(engine.resultInfo()); })
         .withNativeFunction("preview", [this](Args a, Completion done) { proc_.engine.preview(a[0], (bool) a[1], later(std::move(done))); })
         .withNativeFunction("setPreviewOriginal", [&sampler](Args a, Completion done) { sampler.setPreviewOriginal((bool) a[0]); done(true); })
+        .withNativeFunction("analyze", [this](Args a, Completion done) { proc_.engine.analyze(a[0], later(std::move(done))); })
         .withNativeFunction("resultImage", [this](Args a, Completion done) { proc_.engine.resultImage(fzp::Engine::axisOf(a[0]), later(std::move(done))); })
         .withNativeFunction("clearLayer", [&engine](Args a, Completion done) { engine.clearSource((int) a[0]); done(true); })
         .withNativeFunction("clearResult", [&engine](Args, Completion done) { engine.clearResult(); done(true); })

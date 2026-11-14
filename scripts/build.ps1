@@ -5,7 +5,8 @@
 #
 # It loads the Visual Studio developer environment (so cl.exe, the Windows SDK and Ninja are
 # on PATH), configures CMake into build/<config> and builds every target. Built VST3 plugins
-# are copied to %LOCALAPPDATA%\Programs\Common\VST3.
+# are copied to %LOCALAPPDATA%\Programs\Common\VST3 and the Standalone app is installed
+# (scripts\install-standalone.ps1).
 
 param([ValidateSet("Release", "Debug")][string]$Config = "Release")
 $ErrorActionPreference = "Stop"
@@ -35,3 +36,6 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "`nBuilt in $buildDir" -ForegroundColor Green
 Write-Host "VST3 copied to $env:LOCALAPPDATA\Programs\Common\VST3"
+
+# The Standalone app, for using Fourierizer without a DAW (Start menu > Fourierizer).
+if ($Config -eq "Release") { & (Join-Path $PSScriptRoot "install-standalone.ps1") }

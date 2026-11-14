@@ -6,6 +6,7 @@ import { PluginHost, insidePlugin } from "./plugin-host.ts";
 import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
 import { Piano } from "./view/piano.ts";
+import { AnalysisView } from "./view/analysis.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
 import { Fader, Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./view/controls.ts";
@@ -75,8 +76,15 @@ class App implements LayerHost {
   }
   ensureAudio(): void { this.host.ensureAudio(); }
 
+  /** 0 = grid, 1..4 = a layer, 5 = the result's analysis (over the layers). */
   focus(n: number): void {
-    if (n === this.st.focus) return;
+    if (n === 5) {
+      if (!this.analysis.isOpen) { this.analysis.open(); this.refreshers.forEach((r) => r.refresh()); }
+      return;
+    }
+    const wasOpen = this.analysis.isOpen;
+    if (wasOpen) this.analysis.close();
+    if (n === this.st.focus) { if (wasOpen) this.refreshers.forEach((r) => r.refresh()); return; }
     this.st.focus = n;
     this.layout(true);
     this.refreshers.forEach((r) => r.refresh());
@@ -121,8 +129,17 @@ class App implements LayerHost {
     this.views?.forEach((v) => v.refreshAxis());
     this.resultPiano.setRoot(this.st.root);
     this.resultPiano.draw();
+    this.analysis?.refreshAxes();
   }
   private resultPiano = new Piano();
+  private analysis = new AnalysisView({
+    analyze: (q) => this.host.analyze(q),
+    duration: () => this.result?.duration ?? 0,
+    look: () => this.look(),
+    labels: () => this.labels(),
+    root: () => this.root(),
+    close: () => this.focus(this.st.focus),
+  });
 
   /** Empty one slot: its sound, selections and parameters. */
   removeSound(i: number): void {
@@ -287,6 +304,7 @@ class App implements LayerHost {
 
   private setResult(r: { duration: number } | null, image?: { data: Uint8Array; cols: number; rows: number } | null): void {
     this.result = r;
+    this.analysis.refresh();
     this.resultImg = r && image ? image : null;
     if (r && image) paintSpectrogram(this.resultCanvas, image, 0, this.look());
     else this.resultCanvas.getContext("2d")?.clearRect(0, 0, this.resultCanvas.width, this.resultCanvas.height);
@@ -376,7 +394,8 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
         const sw = h("span", { class: "swatch", "aria-hidden": "true" });
         return { id: String(n), label: String(n), icon: sw as unknown as SVGElement, cls: `row fz-l${n}`, aria: `Focus layer ${n}`, title: `Focus layer ${n} (${n})` };
       }),
-    ], () => String(this.st.focus), (id) => this.focus(+id), "");
+      { id: "5", label: "R", icon: icon(ICONS.wave), cls: "row", aria: "Analyze the result", title: HELP.analysis },
+    ], () => this.analysis.isOpen ? "5" : String(this.st.focus), (id) => this.focus(+id), "");
     const toolSeg = new Segmented(null, ([
       ["rect", "Rect", ICONS.rect, "Drag a rectangle to select (Alt subtracts). Click a selection to move, resize, fade or delete it"],
       ["lasso", "Lasso", ICONS.lasso, "Draw a free shape to select (Alt subtracts). Click a selection to move, scale, fade or delete it"],
@@ -400,6 +419,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     this.layersEl = h("main", { id: "layers", "aria-label": "Layers" });
     this.views = [0, 1, 2, 3].map((i) => new LayerView(i, this));
     this.views.forEach((v) => { v.el.classList.add(`tool-${st.tool}`); this.layersEl.append(v.el); });
+    this.layersEl.append(this.analysis.el);
 
     // result module
     this.statusEl = h("span", { class: "ro-sm", "aria-live": "polite" }, "Starting…");
@@ -451,7 +471,8 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     resultDisplay.addEventListener("keydown", (e) => { if (e.key === "Enter") this.audition(); });
     this.resultAxis = h("div", { class: "rx", "aria-hidden": "true" });
     const resultMain = h("div", { class: "main" },
-      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys),
+      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys,
+        key(null, ICONS.focus, { class: "sm", "aria-label": "Analyze the result", title: HELP.analysis }, () => this.focus(5))),
       h("div", { class: "rhead" }, opSeg.el, this.opHint),
       h("div", { class: "rbody" }, this.resultPiano.el, resultDisplay), this.resultAxis);
     const resultMod = h("section", { class: "module result", "aria-label": "Result" }, ...screws(), goCol, resultMain);
@@ -565,6 +586,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
         this.previewShown = -1;
       }
       if (s.preview >= 0) this.views[s.preview].setPlayhead(s.previewPos);
+      this.analysis.setPlayhead(s.result);
       if (s.result < 0) this.playheadEl.style.display = "none";
       else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${s.result * 100}%`; }
       const preparing = this.st.keytrack === "spectral" && (s.spectralReady ?? 0) < (s.spectralTotal ?? 0);
@@ -623,8 +645,8 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
         this.editShapes(p.layer, (sh) => { sh.splice(p.shape, 1); });
         return;
       }
-      if (e.key === "Escape") { if (this.pickedShape) this.setPicked(null); else this.focus(0); return; }
-      if (/^Digit[0-4]$/.test(e.code) && !e.shiftKey) { this.focus(+e.code.slice(5)); return; }
+      if (e.key === "Escape") { if (this.analysis.isOpen) this.focus(this.st.focus); else if (this.pickedShape) this.setPicked(null); else this.focus(0); return; }
+      if (/^Digit[0-5]$/.test(e.code) && !e.shiftKey) { this.focus(+e.code.slice(5)); return; }
       if (e.repeat) { if (e.code in KEYMAP || e.code === "Space") e.preventDefault(); return; }
       if (e.code === "KeyZ" || e.code === "KeyX") { this.keyBase = Math.max(12, Math.min(96, this.keyBase + (e.code === "KeyX" ? 12 : -12))); this.updateKeys(); return; }
       if (e.code === "Space" && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); this.ensureAudio(); this.host.noteOn(this.st.root, 0.9); this.held.set("Space", this.st.root); return; }
@@ -710,10 +732,12 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
       if (this.result) this.host.resultImage(getAxis()).then((img) => { if (img && this.result) { this.resultImg = img; paintSpectrogram(this.resultCanvas, img, 0, this.look()); } }).catch(() => { });
       this.displayRefresh.forEach((x) => x.refresh());
       this.refreshPianos();
+      this.analysis.refresh();
     };
     const lookChanged = () => {
       this.views.forEach((v) => v.repaint());
       if (this.resultImg) paintSpectrogram(this.resultCanvas, this.resultImg, 0, this.look());
+      this.analysis.repaint();
     };
     const scale = new Segmented("Scale", [{ id: "log", label: "Log", title: HELP.scale }, { id: "lin", label: "Lin", title: HELP.scale }],
       () => d().scale, (id) => { d().scale = id as "log" | "lin"; axisChanged(); });
