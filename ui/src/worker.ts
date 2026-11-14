@@ -56,7 +56,7 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         for (const k of pitched.keys()) if (k.startsWith(`${msg.id}:`)) pitched.delete(k);
         break;
       case "image": {
-        const img = msg.channels.length && msg.channels[0].length ? spectrogramImage(mid(msg.channels), msg.sr, RESULT_GRID, 1400, 300, msg.axis) : null;
+        const img = msg.channels.length && msg.channels[0].length ? spectrogramImage(mid(msg.channels), msg.sr, RESULT_GRID, msg.cols ?? 1400, msg.rows ?? 300, msg.axis) : null;
         ctx.postMessage({ type: "image", req: msg.req, image: img }, img ? [img.data.buffer] : []);
         break;
       }
@@ -99,6 +99,9 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         ctx.postMessage({ type: "analyze", req: msg.req, image: img, wave, t0: msg.t0, t1: msg.t1 }, [img.data.buffer, wave.buffer]);
         break;
       }
+      case "setResult":
+        lastResult = msg.channels.map((c) => Float64Array.from(c));
+        break;
       case "shift": {
         const y = lastResult.length && lastResult[0].length ? spectralPitch(lastResult, msg.semitones, msg.n).map((c) => Float32Array.from(c)) : [];
         ctx.postMessage({ type: "shift", req: msg.req, channels: y }, y.map((c) => c.buffer));

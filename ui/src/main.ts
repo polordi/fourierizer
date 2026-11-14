@@ -1,12 +1,13 @@
 // Fourierizer UI entry point. Builds the window, owns the project state and talks to its
 // environment through `Host`: BrowserHost in the demo, PluginHost inside the plugin.
 
-import { BrowserHost, type Host, type PlayState, type ResultInfo, type SamplerParams, type SourceInfo } from "./host.ts";
+import { BrowserHost, TAKE_PREVIEW, type Host, type PlayState, type Restored, type ResultInfo, type SamplerParams, type SourceInfo, type TakeInfo } from "./host.ts";
 import { PluginHost, insidePlugin } from "./plugin-host.ts";
 import { HELP } from "./view/help.ts";
 import { installTooltips } from "./view/tooltip.ts";
 import { Piano } from "./view/piano.ts";
 import { AnalysisView } from "./view/analysis.ts";
+import { TakesPanel } from "./view/takes.ts";
 import { LayerView, paintSpectrogram, type LayerHost, type Mode } from "./view/layer.ts";
 import { h, icon, ICONS, screws } from "./view/dom.ts";
 import { Fader, Knob, MiniKnob, Segmented, Stepper, confirmKey, key } from "./view/controls.ts";
@@ -159,7 +160,7 @@ class App implements LayerHost {
   private resetAll(): void {
     this.stopPreview();
     for (let i = 0; i < 4; i++) this.host.clearSource(i);
-    const keep = { adsr: this.st.adsr, root: this.st.root, display: this.st.display, auto: this.st.auto };
+    const keep = { adsr: this.st.adsr, root: this.st.root, display: this.st.display, auto: this.st.auto, keytrack: this.st.keytrack, spectralWindow: this.st.spectralWindow };
     this.st = { ...emptyState(), ...keep };
     this.original = [false, false, false, false];
     this.pickedShape = null;
@@ -179,6 +180,7 @@ class App implements LayerHost {
   private previewReq = 0;
   private previewWanted = -1;
   private previewShown = -1;
+  private previewSince = 0;
   togglePreview(i: number): void {
     this.ensureAudio();
     if (this.previewShown === i || this.previewWanted === i) { this.stopPreview(); return; }
@@ -194,13 +196,16 @@ class App implements LayerHost {
       this.previewWanted = -1;
       if (!(r.peak > 0)) { this.views[i].setPreviewing(false); this.toast(`The selection on layer ${i + 1} is silent`); return; }
       this.previewShown = i;
+      this.previewSince = performance.now();
       this.animatePlayhead();
     }).catch((e: Error) => { if (req === this.previewReq) { this.previewWanted = -1; this.views[i].setPreviewing(false); this.toast(e.message); } });
   }
   private stopPreview(): void {
     this.previewReq++;
-    for (const j of [this.previewWanted, this.previewShown]) if (j >= 0) this.views[j].setPreviewing(false);
+    for (const j of [this.previewWanted, this.previewShown]) if (j >= 0 && j < 4) this.views[j].setPreviewing(false);
     this.previewWanted = this.previewShown = -1;
+    this.takePlaying = null;
+    this.takesPanel?.refresh();
     this.host.stopPreview();
   }
 
@@ -285,6 +290,8 @@ class App implements LayerHost {
       const all = this.st.layers.map((l) => (active.includes(l) ? this.job(l) : null));
       const r = await this.host.render({ sr: SR, op, a: this.st.opA, b: this.st.opB, layers: active.map((l) => this.job(l)), all, axis: getAxis() });
       this.showResult(r);
+      this.currentTake = null;
+      this.syncKeep();
       const used = pair ? [this.st.opA, this.st.opB] : lit;
       this.leds.forEach((e, i) => (e.dataset.on = String(used.includes(i))));
     } catch (e) {
@@ -304,6 +311,8 @@ class App implements LayerHost {
 
   private setResult(r: { duration: number } | null, image?: { data: Uint8Array; cols: number; rows: number } | null): void {
     this.result = r;
+    if (!r) this.currentTake = null;
+    if (this.keepKey) this.syncKeep();
     this.analysis.refresh();
     this.resultImg = r && image ? image : null;
     if (r && image) paintSpectrogram(this.resultCanvas, image, 0, this.look());
@@ -387,6 +396,29 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     const st = this.st;
     const plugin = this.host.kind === "plugin";
 
+    this.takesPanel = new TakesPanel({
+      takes: () => this.takes,
+      look: () => this.look(),
+      current: () => this.currentTake,
+      playing: () => this.takePlaying,
+      preview: (id) => this.previewTake(id),
+      restore: (id) => void this.restoreTake(id),
+      toLayer: (id, layer) => void this.takeToLayer(id, layer),
+      remove: (id) => {
+        this.host.deleteTake(id);
+        if (this.takePlaying === id) this.stopPreview();
+        this.takes = this.takes.filter((t) => t.id !== id);
+        if (this.currentTake === id) this.currentTake = null;
+        this.syncKeep();
+      },
+      rename: (id, name) => {
+        this.host.renameTake(id, name);
+        const t = this.takes.find((x) => x.id === id);
+        if (t) t.name = name;
+        this.takesPanel.refresh();
+      },
+    });
+
     // header
     const viewSeg = new Segmented(null, [
       { id: "0", label: "Grid", icon: icon(ICONS.grid), cls: "row", aria: "Show all four layers", title: "All four layers (0)" },
@@ -409,7 +441,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
       h("span", { class: "grow" }),
       h("div", { class: "group" }, h("span", { class: "silk" }, "View"), viewSeg.el),
       h("div", { class: "group" }, h("span", { class: "silk" }, "Tool"), toolSeg.el),
-      h("div", { class: "group" }, this.buildDisplayPanel(),
+      h("div", { class: "group" }, this.buildDisplayPanel(), this.takesPanel.el,
         confirmKey(key("New", ICONS.fresh, { class: "sm", title: HELP.fresh }), () => this.resetAll())),
       h("div", { class: "group" },
         key(null, ICONS.undo, { class: "sm", "aria-label": "Undo", title: "Undo (Ctrl+Z)" }, () => this.undo()),
@@ -462,6 +494,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     this.outKeys = h("div", { class: "outkeys" }, exportKey, dragKey);
     this.outKeys.hidden = !plugin;
 
+    this.keepKey = key("Keep", ICONS.keep, { class: "sm", title: HELP.keep }, () => void this.keep().catch((e: Error) => this.toast(e.message)));
     this.resultCanvas = h("canvas", { class: "spec" });
     this.playheadEl = h("span", { class: "playhead" });
     this.resultEmpty = h("div", { class: "empty-hint silk" }, "Nothing selected yet");
@@ -471,7 +504,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     resultDisplay.addEventListener("keydown", (e) => { if (e.key === "Enter") this.audition(); });
     this.resultAxis = h("div", { class: "rx", "aria-hidden": "true" });
     const resultMain = h("div", { class: "main" },
-      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys,
+      h("div", { class: "rhead" }, h("span", { style: "font:600 16px/20px var(--font-sans)" }, "Result"), this.pairRow, h("span", { class: "grow" }), this.resultMeta, this.outKeys, this.keepKey,
         key(null, ICONS.focus, { class: "sm", "aria-label": "Analyze the result", title: HELP.analysis }, () => this.focus(5))),
       h("div", { class: "rhead" }, opSeg.el, this.opHint),
       h("div", { class: "rbody" }, this.resultPiano.el, resultDisplay), this.resultAxis);
@@ -569,9 +602,69 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     if (!this.result) return;
     this.slotPick.hidden = true;
     try {
-      const info = await this.host.resultToLayer(i, `Result → L${i + 1}`);
+      const take = await this.keep(true).catch(() => null);
+      const info = await this.host.resultToLayer(i, take?.name ?? `Result → L${i + 1}`, take?.id ?? 0);
       this.applySource(i, info, false);
-      this.toast(`The result is now layer ${i + 1}. Select parts of it to iterate.`);
+      this.toast(`${take ? take.name : "The result"} is now layer ${i + 1}. Select parts of it to iterate.`);
+    } catch (e) { this.toast((e as Error).message); }
+  }
+
+  // ------------------------------------------------------------------ takes
+  private takes: TakeInfo[] = [];
+  private currentTake: number | null = null;   // the take the shown result is, if it was kept
+  private takePlaying: number | null = null;
+  private keepKey!: HTMLButtonElement;
+  private takesPanel!: TakesPanel;
+
+  private syncKeep(): void {
+    const kept = this.currentTake !== null;
+    this.keepKey.setAttribute("aria-pressed", String(kept));
+    this.keepKey.querySelector("span:last-child")!.textContent = kept ? "Kept" : "Keep";
+    this.keepKey.disabled = !this.result;
+    this.takesPanel.refresh();
+  }
+
+  /** Keeps the current result as a take (once): returns it. */
+  private async keep(quiet = false): Promise<TakeInfo | null> {
+    if (!this.result) return null;
+    const existing = this.takes.find((t) => t.id === this.currentTake);
+    if (existing) { if (!quiet) this.toast(`Already kept as ${existing.name}`); return existing; }
+    const t = await this.host.keepTake(this.serialized());
+    this.takes.push(t);
+    this.currentTake = t.id;
+    this.syncKeep();
+    if (!quiet) this.toast(`Kept as ${t.name}. Open Takes to hear it, restore it or iterate from it.`);
+    return t;
+  }
+
+  private async restoreTake(id: number): Promise<void> {
+    const t = this.takes.find((x) => x.id === id);
+    this.stopPreview();
+    try {
+      const r = await this.host.restoreTake(id);
+      await this.applyRestored(r);
+      this.currentTake = id;
+      this.syncKeep();
+      this.status(`Restored ${t?.name ?? "the take"}`);
+    } catch (e) { this.toast((e as Error).message); }
+  }
+
+  private previewTake(id: number): void {
+    this.ensureAudio();
+    if (this.takePlaying === id) { this.stopPreview(); return; }
+    this.stopPreview();
+    this.takePlaying = id;
+    this.previewShown = TAKE_PREVIEW;
+    this.previewSince = performance.now();
+    this.takesPanel.refresh();
+    this.host.previewTake(id).then(() => this.animatePlayhead()).catch((e: Error) => { this.takePlaying = null; this.previewShown = -1; this.takesPanel.refresh(); this.toast(e.message); });
+  }
+
+  private async takeToLayer(id: number, layer: number): Promise<void> {
+    try {
+      const info = await this.host.takeToLayer(id, layer);
+      this.applySource(layer, info, false);
+      this.toast(`${info.name} is now layer ${layer + 1}`);
     } catch (e) { this.toast((e as Error).message); }
   }
 
@@ -581,11 +674,13 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     const tick = () => {
       const s = this.host.playState();
       this.showPrep(s);
-      if (this.previewShown >= 0 && s.preview !== this.previewShown && this.previewWanted < 0) {
-        this.views[this.previewShown].setPreviewing(false);   // the preview ended on its own
+      // the plugin reports playback through events, a few ms late: give a new preview a moment
+      if (this.previewShown >= 0 && s.preview !== this.previewShown && this.previewWanted < 0 && performance.now() - this.previewSince > 400) {
+        if (this.previewShown < 4) this.views[this.previewShown].setPreviewing(false);   // the preview ended on its own
+        else { this.takePlaying = null; this.takesPanel.refresh(); }
         this.previewShown = -1;
       }
-      if (s.preview >= 0) this.views[s.preview].setPlayhead(s.previewPos);
+      if (s.preview >= 0 && s.preview < 4) this.views[s.preview].setPlayhead(s.previewPos);
       this.analysis.setPlayhead(s.result);
       if (s.result < 0) this.playheadEl.style.display = "none";
       else { this.playheadEl.style.display = "block"; this.playheadEl.style.left = `${s.result * 100}%`; }
@@ -680,6 +775,14 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
   private async restore(): Promise<void> {
     const r = await this.host.start();
     if (!r) return;
+    this.takes = r.takes ?? [];
+    this.currentTake = null;
+    await this.applyRestored(r);
+    this.syncKeep();
+  }
+
+  /** Puts a saved state on screen: the project's layers and selections, their sounds and the result. */
+  private async applyRestored(r: Restored): Promise<void> {
     let next = emptyState();
     if (r.project) {
       try {
@@ -697,6 +800,10 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
       next.adsr = { a: r.params.a, d: r.params.d, s: r.params.s, r: r.params.r }; next.root = r.params.root;
       if (r.params.mode) next.keytrack = r.params.mode;
       if (r.params.window) next.spectralWindow = r.params.window;
+    } else {
+      // a take: the instrument (sampler) and the way you look at it stay as they are now
+      const cur = this.st;
+      Object.assign(next, { adsr: cur.adsr, root: cur.root, keytrack: cur.keytrack, spectralWindow: cur.spectralWindow, display: cur.display, focus: cur.focus, tool: cur.tool });
     }
     next.display = { ...DEFAULT_DISPLAY, ...next.display };
     this.st = next;
@@ -715,7 +822,10 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     this.refreshPianos();
     this.layout(false);
     this.views.forEach((v, i) => { v.clearSpectrogram(); v.refresh(); if (this.st.layers[i].loaded) void this.requestSpectrogram(i); });
-    if (r.result && r.result.duration > 0) this.showResult(r.result);
+    if (r.result && r.result.duration > 0) {
+      this.showResult(r.result);
+      if (!r.result.image) void this.host.resultImage(getAxis()).then((img) => { if (img && this.result) { this.resultImg = img; paintSpectrogram(this.resultCanvas, img, 0, this.look()); } });
+    }
     else if (this.st.layers.some((l) => l.loaded)) await this.renderNow();
     else { this.setResult(null); this.status("Drop sounds on the layers to begin"); }
   }

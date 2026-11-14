@@ -278,3 +278,22 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .ana-wave { width: 100%; height: 100%; border: 1.5px solid var(--ink); background: var(--display); box-sizing: border-box; cursor: grab; touch-action: none; }
 .ana-wlabel { align-self: center; justify-self: end; padding-right: 6px; }
 .analysis .ana-xax { position: relative; left: auto; right: auto; bottom: auto; height: 16px; }
+
+/* Takes: the iteration history, a panel under the header like Display */
+.takespanel { position: absolute; z-index: 30; top: calc(100% + 10px); right: 0; width: 560px; max-height: 620px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; padding: 14px 16px;
+  background: var(--panel); border: 1.5px solid var(--ink); border-radius: var(--radius-md); box-shadow: 0 3px 0 var(--ink); animation: fz-pop 160ms ease-out both; }
+.takespanel[hidden] { display: none; }
+.takespanel > .row { display: flex; align-items: baseline; gap: 10px; }
+.takelist { display: grid; gap: 8px; overflow-y: auto; min-height: 0; padding-right: 2px; }
+.takeempty { padding: 14px 4px; white-space: normal; line-height: 16px; }
+.take { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; border: 1px solid var(--seam); border-radius: var(--radius-sm); background: var(--display); }
+.take.current { border-color: var(--ink); box-shadow: inset 3px 0 0 var(--layer-3); }
+.tthumb { width: 120px; height: 40px; border: 1px solid var(--seam); image-rendering: auto; }
+.tmain { display: grid; gap: 2px; min-width: 0; }
+.trow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tname { font: 600 14px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; outline: none; border-radius: 2px; }
+.tname[contenteditable="true"] { background: var(--panel); box-shadow: 0 0 0 1.5px var(--ink); padding: 0 3px; text-overflow: clip; }
+.tline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tactions { display: grid; gap: 6px; justify-items: end; }
+.tsend { display: flex; align-items: center; gap: 4px; }
+.tsend .key { min-width: 24px; padding: 0 4px; }

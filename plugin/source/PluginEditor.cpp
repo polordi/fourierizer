@@ -113,7 +113,14 @@ juce::WebBrowserComponent::Options FourierizerEditor::options() {
         .withNativeFunction("noteOff", [&sampler](Args a, Completion done) { sampler.uiNoteOff((int) a[0]); done(true); })
         .withNativeFunction("allOff", [&sampler](Args, Completion done) { sampler.uiAllOff(); done(true); })
         .withNativeFunction("setParams", [this](Args a, Completion done) { proc_.setSamplerParams(a[0]); done(true); })
-        .withNativeFunction("resultToLayer", [&engine](Args a, Completion done) { done(engine.resultToLayer((int) a[0], a[1].toString())); })
+        .withNativeFunction("resultToLayer", [&engine](Args a, Completion done) { done(engine.resultToLayer((int) a[0], a[1].toString(), a.size() > 2 ? (int) a[2] : 0)); })
+        .withNativeFunction("keepTake", [&engine](Args a, Completion done) { done(engine.keepTake(a[0].toString(), a.size() > 1 ? a[1].toString() : juce::String())); })
+        .withNativeFunction("takes", [&engine](Args, Completion done) { done(engine.takes()); })
+        .withNativeFunction("restoreTake", [this](Args a, Completion done) { proc_.engine.restoreTake((int) a[0], later(std::move(done))); })
+        .withNativeFunction("deleteTake", [&engine](Args a, Completion done) { engine.deleteTake((int) a[0]); done(true); })
+        .withNativeFunction("renameTake", [&engine](Args a, Completion done) { engine.renameTake((int) a[0], a[1].toString()); done(true); })
+        .withNativeFunction("takeToLayer", [this](Args a, Completion done) { proc_.engine.takeToLayer((int) a[0], (int) a[1], later(std::move(done))); })
+        .withNativeFunction("previewTake", [this](Args a, Completion done) { proc_.engine.previewTake((int) a[0], later(std::move(done))); })
         .withNativeFunction("exportResult", [this](Args, Completion done) { exportResult(std::move(done)); })
         .withNativeFunction("dragResult", [this](Args, Completion done) { dragResult(); done(true); });
 }
@@ -141,7 +148,8 @@ void FourierizerEditor::loadProject(Completion done) {
     done(obj({{"project", project.isEmpty() ? juce::var() : juce::var(project)},
               {"layers", layers},
               {"result", proc_.engine.resultInfo()},
-              {"params", proc_.samplerParams()}}));
+              {"params", proc_.samplerParams()},
+              {"takes", proc_.engine.takes()}}));
 }
 
 void FourierizerEditor::pickFile(int layer, Completion done) {

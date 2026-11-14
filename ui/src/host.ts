@@ -5,13 +5,20 @@
 
 import type { Grid } from "./dsp/stft.ts";
 import type { Op } from "./dsp/ops.ts";
-import type { Analysis, AnalysisRequest, Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
+import { DEFAULT_AXIS, type Analysis, type AnalysisRequest, type Axis, type SpectrogramImage } from "./dsp/spectrogram.ts";
 import { SPECTRAL_N, type SpectralWindow } from "./dsp/spectral.ts";
 import type { LayerJob, WorkerReply, WorkerRequest } from "./protocol.ts";
 import { Sampler } from "./audio/sampler.ts";
 import { MAX_SECONDS, SR, adsrMap } from "./model.ts";
 
-export interface SourceInfo { name: string; samples: number; channels: number; trimmed?: boolean; }
+/** origin: the take this sound came from (0 = a file). */
+export interface SourceInfo { name: string; samples: number; channels: number; trimmed?: boolean; origin?: number; }
+/** A kept result with its recipe (layers, selections, operation). */
+export interface TakeInfo {
+  id: number; name: string; created: number; duration: number; op: string;
+  thumb: SpectrogramImage | null;
+  layers: ({ name: string; origin: number } | null)[];
+}
 export interface ResultInfo { image: SpectrogramImage | null; peak: number; ms: number; duration: number; }
 /** spectralReady / spectralTotal: Spectral copies already computed among the ±12 st computed ahead. */
 export interface PlayState { result: number; preview: number; previewPos: number; voices: number; spectralReady?: number; spectralTotal?: number; }
@@ -19,7 +26,7 @@ export interface SamplerParams {
   a: number; d: number; s: number; r: number; root: number;
   mode?: "tape" | "spectral"; window?: SpectralWindow;
 }
-export interface Restored { project: string | null; layers: (SourceInfo | null)[]; result: ResultInfo | null; params: SamplerParams | null; }
+export interface Restored { project: string | null; layers: (SourceInfo | null)[]; result: ResultInfo | null; params: SamplerParams | null; takes?: TakeInfo[]; }
 export interface RenderJob { sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; axis: Axis; }
 
 export interface Host {
@@ -27,7 +34,7 @@ export interface Host {
   /** Plugin: the saved project (if any). Browser: null (the demo loads examples). */
   start(): Promise<Restored | null>;
   examples(sr: number): Promise<Float32Array[]>;
-  setSourceAudio(i: number, name: string, channels: Float32Array[]): SourceInfo;
+  setSourceAudio(i: number, name: string, channels: Float32Array[], origin?: number): SourceInfo;
   loadFile(i: number, file: File): Promise<SourceInfo>;
   /** Native file dialog (plugin), or null when the UI should use its own <input type=file>. */
   pickFile(i: number): Promise<SourceInfo | null> | null;
@@ -39,7 +46,17 @@ export interface Host {
   clearResult(): void;
   /** The result's analysis view: a detailed spectrogram and waveform of a time span. */
   analyze(req: AnalysisRequest): Promise<Analysis | null>;
-  resultToLayer(i: number, name: string): Promise<SourceInfo>;
+  resultToLayer(i: number, name: string, origin?: number): Promise<SourceInfo>;
+
+  // ---- takes: the iteration history
+  keepTake(project: string, name?: string): Promise<TakeInfo>;
+  /** Layers, project and result as they were (like start(), without sampler parameters). */
+  restoreTake(id: number): Promise<Restored>;
+  deleteTake(id: number): void;
+  renameTake(id: number, name: string): void;
+  takeToLayer(id: number, layer: number): Promise<SourceInfo>;
+  /** Plays a take once (preview "layer" TAKE_PREVIEW). */
+  previewTake(id: number): Promise<void>;
   /** Play a layer once: its selection, and in sync its original sound for A/B (`original`). */
   preview(i: number, job: LayerJob, original: boolean): Promise<{ peak: number }>;
   setPreviewOriginal(on: boolean): void;
@@ -61,6 +78,12 @@ export interface Host {
 }
 
 declare const __WORKER_SOURCE__: string;
+
+/** The preview "layer" number of a take (layers are 0–3). */
+export const TAKE_PREVIEW = 9;
+const MAX_TAKES = 24;
+
+interface BrowserTake { info: TakeInfo; project: string; sources: ({ name: string; channels: Float32Array[]; origin: number } | null)[]; result: Float32Array[]; peak: number; }
 
 type Pending = { resolve: (v: never) => void; reject: (e: Error) => void };
 
@@ -104,9 +127,10 @@ export class BrowserHost implements Host {
     return r.sounds;
   }
 
-  setSourceAudio(i: number, name: string, channels: Float32Array[]): SourceInfo {
-    const info = { name, samples: channels[0].length, channels: channels.length };
+  setSourceAudio(i: number, name: string, channels: Float32Array[], origin = 0): SourceInfo {
+    const info = { name, samples: channels[0].length, channels: channels.length, origin };
     if (this.sampler.previewLayer === i) this.sampler.stopPreview();
+    this.sources[i] = { name, channels: channels.map((c) => c.slice()), origin };   // kept for takes
     this.worker.postMessage({ type: "source", id: i, channels } satisfies WorkerRequest, channels.map((c) => c.buffer));
     return info;
   }
@@ -122,6 +146,7 @@ export class BrowserHost implements Host {
 
   clearSource(i: number): void {
     if (this.sampler.previewLayer === i) this.sampler.stopPreview();
+    this.sources[i] = null;
     this.worker.postMessage({ type: "clear", id: i } satisfies WorkerRequest);
   }
 
@@ -142,6 +167,8 @@ export class BrowserHost implements Host {
     const r = await this.call<{ channels: Float32Array[]; peak: number; ms: number; image: SpectrogramImage | null }>({ type: "render", req: this.next++, ...job });
     const n = r.channels[0]?.length ?? 0;
     this.result = n ? r.channels : null;
+    this.resultPeak = r.peak;
+    this.resultOp = job.op;
     this.sampler.setResult(this.result ?? [], SR);
     this.resetBank();
     return { image: n ? r.image : null, peak: r.peak, ms: r.ms, duration: n / SR };
@@ -153,9 +180,64 @@ export class BrowserHost implements Host {
     return r.image && r.wave ? { image: r.image, wave: r.wave, t0: r.t0, t1: r.t1 } : null;
   }
 
-  async resultToLayer(i: number, name: string): Promise<SourceInfo> {
+  async resultToLayer(i: number, name: string, origin = 0): Promise<SourceInfo> {
     if (!this.result) throw new Error("Render something first");
-    return this.setSourceAudio(i, name, this.result.map((c) => c.slice()));
+    return this.setSourceAudio(i, name, this.result.map((c) => c.slice()), origin);
+  }
+
+  // ---- takes (kept in memory: the demo does not save projects)
+  private sources: ({ name: string; channels: Float32Array[]; origin: number } | null)[] = [null, null, null, null];
+  private takeList: BrowserTake[] = [];
+  private nextTake = 1;
+  private resultPeak = 0;
+  private resultOp = "sum";
+
+  async keepTake(project: string, name?: string): Promise<TakeInfo> {
+    if (!this.result) throw new Error("Render something first");
+    if (this.takeList.length >= MAX_TAKES) throw new Error(`The history is full (${MAX_TAKES} takes): delete one first`);
+    const result = this.result.map((c) => c.slice()), copies = result.map((c) => c.slice());
+    const r = await this.call<{ image: SpectrogramImage | null }>({ type: "image", req: this.next++, sr: SR, channels: copies, axis: DEFAULT_AXIS, cols: 160, rows: 40 }, copies.map((c) => c.buffer));
+    const id = this.nextTake++;
+    const info: TakeInfo = {
+      id, name: name || `Take ${id}`, created: Date.now(), duration: result[0].length / SR, op: this.resultOp, thumb: r.image,
+      layers: this.sources.map((s) => (s ? { name: s.name, origin: s.origin } : null)),
+    };
+    this.takeList.push({ info, project, sources: [...this.sources], result, peak: this.resultPeak });
+    return info;
+  }
+
+  private take(id: number): BrowserTake {
+    const t = this.takeList.find((x) => x.info.id === id);
+    if (!t) throw new Error("This take no longer exists");
+    return t;
+  }
+
+  async restoreTake(id: number): Promise<Restored> {
+    const t = this.take(id);
+    const layers = t.sources.map((s, i) => {
+      if (!s) { this.clearSource(i); return null; }
+      return this.setSourceAudio(i, s.name, s.channels.map((c) => c.slice()), s.origin);
+    });
+    this.result = t.result.map((c) => c.slice());
+    this.resultPeak = t.peak;
+    this.sampler.setResult(this.result, SR);
+    const copies = this.result.map((c) => c.slice());
+    this.worker.postMessage({ type: "setResult", channels: copies } satisfies WorkerRequest, copies.map((c) => c.buffer));
+    this.resetBank();
+    return { project: t.project, layers, result: { image: null, peak: t.peak, ms: 0, duration: t.info.duration }, params: null };
+  }
+
+  deleteTake(id: number): void { this.takeList = this.takeList.filter((x) => x.info.id !== id); }
+  renameTake(id: number, name: string): void { const t = this.takeList.find((x) => x.info.id === id); if (t && name.trim()) t.info.name = name.trim(); }
+
+  async takeToLayer(id: number, layer: number): Promise<SourceInfo> {
+    const t = this.take(id);
+    return this.setSourceAudio(layer, t.info.name, t.result.map((c) => c.slice()), id);
+  }
+
+  async previewTake(id: number): Promise<void> {
+    const t = this.take(id);
+    this.sampler.playPreview(TAKE_PREVIEW, t.result, null, SR, 1, false);
   }
 
   async preview(i: number, job: LayerJob, original: boolean): Promise<{ peak: number }> {

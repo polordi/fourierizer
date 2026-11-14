@@ -95,13 +95,17 @@ std::vector<fz::Shape> Engine::shapesOf(const juce::var& v) {
 }
 
 // ------------------------------------------------------------------------------ sources
-juce::var Engine::setSource(int layer, const juce::String& name, fz::Channels audio, std::shared_ptr<juce::MemoryBlock> flac) {
-    if (layer < 0 || layer > 3) return errorVar("bad layer");
-    auto shared = std::make_shared<const fz::Channels>(std::move(audio));
+juce::var Engine::setSource(int layer, const juce::String& name, fz::Channels audio, std::shared_ptr<juce::MemoryBlock> flac, int origin) {
+    return setSourceShared(layer, name, std::make_shared<const fz::Channels>(std::move(audio)), std::move(flac), origin);
+}
+
+juce::var Engine::setSourceShared(int layer, const juce::String& name, std::shared_ptr<const fz::Channels> shared,
+                                  std::shared_ptr<juce::MemoryBlock> flac, int origin) {
+    if (layer < 0 || layer > 3 || shared == nullptr) return errorVar("bad layer");
     const int samples = shared->empty() ? 0 : (int) (*shared)[0].size(), chans = (int) shared->size();
     {
         std::lock_guard lock(mutex_);
-        sources_[(size_t) layer] = {name, shared, flac};
+        sources_[(size_t) layer] = {name, shared, flac, origin};
         for (auto it = pitchCache_.begin(); it != pitchCache_.end();)
             it = it->first.rfind(std::to_string(layer) + ":", 0) == 0 ? pitchCache_.erase(it) : std::next(it);
     }
@@ -111,14 +115,14 @@ juce::var Engine::setSource(int layer, const juce::String& name, fz::Channels au
             std::lock_guard lock(mutex_);
             if (sources_[(size_t) layer].audio == shared) sources_[(size_t) layer].flac = enc;
         });
-    return obj({{"name", name}, {"samples", samples}, {"channels", chans}});
+    return obj({{"name", name}, {"samples", samples}, {"channels", chans}, {"origin", origin}});
 }
 
 juce::var Engine::sourceInfo(int layer) const {
     std::lock_guard lock(mutex_);
     const auto& s = sources_[(size_t) layer];
     if (s.audio == nullptr) return {};
-    return obj({{"name", s.name}, {"samples", s.audio->empty() ? 0 : (int) (*s.audio)[0].size()}, {"channels", (int) s.audio->size()}});
+    return obj({{"name", s.name}, {"samples", s.audio->empty() ? 0 : (int) (*s.audio)[0].size()}, {"channels", (int) s.audio->size()}, {"origin", s.origin}});
 }
 
 juce::var Engine::finishDecode(int layer, juce::AudioFormatReader* reader, const juce::String& name) {
@@ -175,14 +179,34 @@ void Engine::clearResult() {
     resultWav_.deleteFile();
 }
 
-juce::var Engine::resultToLayer(int layer, const juce::String& name) {
+// The sampler and the Spectral bank play `y` (silence clears them).
+void Engine::installResult(const std::shared_ptr<const fz::Channels>& y, double peak) {
+    const int n = y == nullptr || y->empty() ? 0 : (int) (*y)[0].size();
+    if (n == 0 || peak <= 0) {
+        sampler_.setResult(nullptr);
+        bank_.setSource(nullptr, nullptr);
+        return;
+    }
+    SampleBuffer::Ptr buf = new SampleBuffer();
+    buf->sampleRate = kProjectRate;
+    buf->audio.setSize(2, n);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < n; ++i) buf->audio.setSample(c, i, (float) (*y)[std::min<size_t>((size_t) c, y->size() - 1)][(size_t) i]);
+    sampler_.setResult(buf);
+    bank_.setSource(y, buf);
+}
+
+juce::var Engine::resultToLayer(int layer, const juce::String& name, int origin) {
     std::shared_ptr<const fz::Channels> r;
+    std::shared_ptr<juce::MemoryBlock> flac;
     {
         std::lock_guard lock(mutex_);
         r = result_;
+        for (auto& t : takes_)
+            if (t.id == origin && t.result == r) flac = t.flac;
     }
     if (r == nullptr || r->empty()) return errorVar("no result");
-    return setSource(layer, name, *r);
+    return setSourceShared(layer, name, r, flac, origin);
 }
 
 std::shared_ptr<const fz::Channels> Engine::pitched(int layer, double semitones) {
@@ -285,15 +309,8 @@ void Engine::runRender(const juce::var& request, std::shared_ptr<std::atomic<boo
 
         const double peak = fz::peakOf(y);
         const int n = y.empty() ? 0 : (int) y[0].size();
-        SampleBuffer::Ptr buf = new SampleBuffer();
-        buf->sampleRate = kProjectRate;
-        buf->audio.setSize(2, n);
-        for (int c = 0; c < 2; ++c)
-            for (int i = 0; i < n; ++i) buf->audio.setSample(c, i, (float) y[(size_t) std::min<size_t>((size_t) c, y.size() - 1)][(size_t) i]);
-        const bool audible = n > 0 && peak > 0;
         auto shared = std::make_shared<const fz::Channels>(std::move(y));
-        sampler_.setResult(audible ? buf : nullptr);
-        bank_.setSource(audible ? shared : nullptr, audible ? buf : nullptr);
+        installResult(shared, peak);
 
         juce::var image;
         if (n > 0) {
@@ -410,6 +427,156 @@ bool Engine::writeResultWav(const juce::File& file) const {
     return w->writeFromAudioSampleBuffer(buf, 0, n);
 }
 
+// ------------------------------------------------------------------------------ takes
+std::shared_ptr<const fz::Channels> Engine::decodeFlac(const juce::MemoryBlock& mb) {
+    juce::FlacAudioFormat flac;
+    std::unique_ptr<juce::AudioFormatReader> r(flac.createReaderFor(new juce::MemoryInputStream(mb, false), true));
+    if (r == nullptr) return nullptr;
+    const int n = (int) r->lengthInSamples, chans = (int) r->numChannels;
+    juce::AudioBuffer<float> buf(chans, n);
+    r->read(&buf, 0, n, 0, true, true);
+    fz::Channels audio((size_t) chans);
+    for (int c = 0; c < chans; ++c) audio[(size_t) c].assign(buf.getReadPointer(c), buf.getReadPointer(c) + n);
+    return std::make_shared<const fz::Channels>(std::move(audio));
+}
+
+juce::var Engine::takeInfo(const Take& t) {
+    juce::Array<juce::var> layers;
+    for (const auto& s : t.sources) layers.add(s.audio == nullptr ? juce::var() : obj({{"name", s.name}, {"origin", s.origin}}));
+    juce::var thumb;
+    if (!t.thumb.empty()) thumb = obj({{"key", putBlob("take" + juce::String(t.id), toBytes(t.thumb))}, {"cols", t.thumbCols}, {"rows", t.thumbRows}});
+    return obj({{"id", t.id}, {"name", t.name}, {"created", (double) t.created}, {"duration", t.samples / kProjectRate},
+                {"op", t.request["op"].toString()}, {"thumb", thumb}, {"layers", layers}});
+}
+
+juce::var Engine::keepTake(const juce::String& project, const juce::String& name) {
+    Take t;
+    {
+        std::lock_guard lock(mutex_);
+        if (result_ == nullptr || result_->empty() || (*result_)[0].empty()) return errorVar("Render something first");
+        if ((int) takes_.size() >= kMaxTakes) return errorVar("The history is full (" + juce::String(kMaxTakes) + " takes): delete one first");
+        t.id = nextTakeId_++;
+        t.name = name.isNotEmpty() ? name : "Take " + juce::String(t.id);
+        t.project = project;
+        t.request = lastRequest_;
+        t.sources = sources_;
+        t.result = result_;
+        t.samples = (int) (*result_)[0].size();
+        t.peak = (double) resultInfo_["peak"];
+        t.created = juce::Time::currentTimeMillis();
+    }
+    const auto img = fz::spectrogramImage(fz::midOf(*t.result), kProjectRate, kResultGrid, 160, 40);
+    t.thumb = img.data;
+    t.thumbCols = img.cols;
+    t.thumbRows = img.rows;
+    {
+        std::lock_guard lock(mutex_);
+        takes_.push_back(t);
+    }
+    run(pool_, "encode take", [this, result = t.result, id = t.id] {
+        auto enc = encodeFlac(*result);
+        std::lock_guard lock(mutex_);
+        for (auto& k : takes_)
+            if (k.id == id) k.flac = enc;
+    });
+    return takeInfo(t);
+}
+
+juce::var Engine::takes() {
+    std::vector<Take> copy;
+    {
+        std::lock_guard lock(mutex_);
+        copy = takes_;
+    }
+    juce::Array<juce::var> list;
+    for (const auto& t : copy) list.add(takeInfo(t));
+    return list;
+}
+
+// The take's result, decoded from its FLAC the first time after loading a project.
+std::shared_ptr<const fz::Channels> Engine::takeAudio(int id, juce::String* name, std::shared_ptr<juce::MemoryBlock>* flacOut) {
+    std::shared_ptr<const fz::Channels> audio;
+    std::shared_ptr<juce::MemoryBlock> flac;
+    {
+        std::lock_guard lock(mutex_);
+        for (const auto& t : takes_)
+            if (t.id == id) {
+                audio = t.result;
+                flac = t.flac;
+                if (name != nullptr) *name = t.name;
+            }
+    }
+    if (flacOut != nullptr) *flacOut = flac;
+    if (audio != nullptr || flac == nullptr) return audio;
+    audio = decodeFlac(*flac);
+    std::lock_guard lock(mutex_);
+    for (auto& t : takes_)
+        if (t.id == id) t.result = audio;
+    return audio;
+}
+
+void Engine::restoreTake(int id, Done done) {
+    run(pool_, "restore take", [this, id, done] {
+        auto audio = takeAudio(id);
+        if (audio == nullptr) return done(errorVar("This take no longer exists"));
+        double peak = 0;
+        {
+            std::lock_guard lock(mutex_);
+            const auto it = std::find_if(takes_.begin(), takes_.end(), [&](const Take& t) { return t.id == id; });
+            if (it == takes_.end()) return done(errorVar("This take no longer exists"));
+            if (renderCancel_) *renderCancel_ = true;
+            sources_ = it->sources;
+            pitchCache_.clear();
+            result_ = audio;
+            lastRequest_ = it->request;
+            project_ = it->project;
+            peak = it->peak;
+            resultInfo_ = obj({{"peak", peak}, {"ms", 0}, {"duration", it->samples / kProjectRate}, {"image", juce::var()}});
+        }
+        installResult(audio, peak);
+        writeResultWav(resultWav_);
+        juce::Array<juce::var> layers;
+        for (int i = 0; i < 4; ++i) layers.add(sourceInfo(i));
+        done(obj({{"project", project()}, {"layers", layers}, {"result", resultInfo()}}));
+    });
+}
+
+void Engine::deleteTake(int id) {
+    std::lock_guard lock(mutex_);
+    takes_.erase(std::remove_if(takes_.begin(), takes_.end(), [&](const Take& t) { return t.id == id; }), takes_.end());
+}
+
+void Engine::renameTake(int id, const juce::String& name) {
+    std::lock_guard lock(mutex_);
+    for (auto& t : takes_)
+        if (t.id == id && name.trim().isNotEmpty()) t.name = name.trim();
+}
+
+void Engine::takeToLayer(int id, int layer, Done done) {
+    run(pool_, "take to layer", [this, id, layer, done] {
+        juce::String name;
+        std::shared_ptr<juce::MemoryBlock> flac;
+        auto audio = takeAudio(id, &name, &flac);
+        if (audio == nullptr) return done(errorVar("This take no longer exists"));
+        done(setSourceShared(layer, name, audio, flac, id));
+    });
+}
+
+void Engine::previewTake(int id, Done done) {
+    run(pool_, "preview take", [this, id, done] {
+        auto audio = takeAudio(id);
+        if (audio == nullptr || audio->empty()) return done(errorVar("This take no longer exists"));
+        SampleBuffer::Ptr buf = new SampleBuffer();
+        buf->sampleRate = kProjectRate;
+        const int n = (int) (*audio)[0].size(), chans = (int) audio->size();
+        buf->audio.setSize(chans, n);
+        for (int c = 0; c < chans; ++c)
+            for (int i = 0; i < n; ++i) buf->audio.setSample(c, i, (float) (*audio)[(size_t) c][(size_t) i]);
+        sampler_.playPreview(kTakePreview, buf, nullptr, 1.0f, false);
+        done(obj({{"duration", n / kProjectRate}}));
+    });
+}
+
 // ------------------------------------------------------------------------------ project
 void Engine::setProject(const juce::String& json) {
     std::lock_guard lock(mutex_);
@@ -438,25 +605,68 @@ std::shared_ptr<juce::MemoryBlock> Engine::encodeFlac(const fz::Channels& audio)
     return mb;
 }
 
+// Version 2: every distinct audio (layers and takes share it) is stored once as FLAC; layers
+// and takes refer to it by index. Version 1 (H5/H6) stored one FLAC per layer.
 juce::MemoryBlock Engine::saveState(const juce::ValueTree& params) const {
     juce::ValueTree root("Fourierizer");
     std::array<Source, 4> sources;
+    std::vector<Take> takes;
     {
         std::lock_guard lock(mutex_);
-        root.setProperty("version", 1, nullptr);
+        root.setProperty("version", 2, nullptr);
         root.setProperty("project", project_, nullptr);
         root.setProperty("request", juce::JSON::toString(lastRequest_, true), nullptr);
+        root.setProperty("nextTake", nextTakeId_, nullptr);
         sources = sources_;
+        takes = takes_;
     }
-    for (int i = 0; i < 4; ++i) {
-        const auto& s = sources[(size_t) i];
-        if (s.audio == nullptr) continue;
+    std::vector<std::pair<const fz::Channels*, Source>> audios;   // distinct audio, with any cached FLAC
+    auto indexOf = [&](const Source& s) {
+        if (s.audio == nullptr) return -1;
+        for (size_t i = 0; i < audios.size(); ++i)
+            if (audios[i].first == s.audio.get()) {
+                if (audios[i].second.flac == nullptr) audios[i].second.flac = s.flac;
+                return (int) i;
+            }
+        audios.push_back({s.audio.get(), s});
+        return (int) audios.size() - 1;
+    };
+    auto layerTree = [&](const char* type, int i, const Source& s) {
+        juce::ValueTree t(type);
+        t.setProperty("index", i, nullptr);
+        t.setProperty("name", s.name, nullptr);
+        t.setProperty("origin", s.origin, nullptr);
+        t.setProperty("audio", indexOf(s), nullptr);
+        return t;
+    };
+    for (int i = 0; i < 4; ++i)
+        if (sources[(size_t) i].audio != nullptr) root.appendChild(layerTree("Layer", i, sources[(size_t) i]), nullptr);
+    for (const auto& k : takes) {
+        juce::ValueTree t("Take");
+        t.setProperty("id", k.id, nullptr);
+        t.setProperty("name", k.name, nullptr);
+        t.setProperty("created", (double) k.created, nullptr);
+        t.setProperty("project", k.project, nullptr);
+        t.setProperty("request", juce::JSON::toString(k.request, true), nullptr);
+        t.setProperty("samples", k.samples, nullptr);
+        t.setProperty("peak", k.peak, nullptr);
+        t.setProperty("thumb", juce::var(juce::MemoryBlock(k.thumb.data(), k.thumb.size())), nullptr);
+        t.setProperty("thumbCols", k.thumbCols, nullptr);
+        t.setProperty("thumbRows", k.thumbRows, nullptr);
+        auto flac = k.flac != nullptr ? k.flac : (k.result != nullptr ? encodeFlac(*k.result) : nullptr);
+        if (flac == nullptr) continue;
+        t.setProperty("flac", juce::var(*flac), nullptr);
+        for (int i = 0; i < 4; ++i)
+            if (k.sources[(size_t) i].audio != nullptr) t.appendChild(layerTree("TakeLayer", i, k.sources[(size_t) i]), nullptr);
+        root.appendChild(t, nullptr);
+    }
+    for (size_t i = 0; i < audios.size(); ++i) {
+        const auto& s = audios[i].second;
         auto flac = s.flac != nullptr ? s.flac : encodeFlac(*s.audio);
-        juce::ValueTree layer("Layer");
-        layer.setProperty("index", i, nullptr);
-        layer.setProperty("name", s.name, nullptr);
-        layer.setProperty("flac", juce::var(*flac), nullptr);
-        root.appendChild(layer, nullptr);
+        juce::ValueTree a("Audio");
+        a.setProperty("index", (int) i, nullptr);
+        a.setProperty("flac", juce::var(*flac), nullptr);
+        root.appendChild(a, nullptr);
     }
     root.appendChild(params.createCopy(), nullptr);
     juce::MemoryOutputStream out;
@@ -474,23 +684,62 @@ juce::ValueTree Engine::loadState(const void* data, int size) {
     {
         std::lock_guard lock(mutex_);
         for (auto& s : sources_) s = {};
+        takes_.clear();
         pitchCache_.clear();
     }
+    // distinct audio (version 2)
+    std::map<int, std::pair<std::shared_ptr<const fz::Channels>, std::shared_ptr<juce::MemoryBlock>>> audios;
+    for (const auto& child : root)
+        if (child.hasType("Audio"))
+            if (const auto* mb = child["flac"].getBinaryData()) {
+                auto flac = std::make_shared<juce::MemoryBlock>(*mb);
+                if (auto audio = decodeFlac(*flac)) audios[(int) child["index"]] = {audio, flac};
+            }
+    auto sourceOf = [&](const juce::ValueTree& t) -> Source {
+        if (t.hasProperty("audio")) {   // version 2
+            const auto it = audios.find((int) t["audio"]);
+            if (it == audios.end()) return {};
+            return {t["name"].toString(), it->second.first, it->second.second, (int) t["origin"]};
+        }
+        const auto* mb = t["flac"].getBinaryData();   // version 1
+        if (mb == nullptr) return {};
+        auto flac = std::make_shared<juce::MemoryBlock>(*mb);
+        return {t["name"].toString(), decodeFlac(*flac), flac, 0};
+    };
+    int maxId = 0;
     for (const auto& child : root) {
-        if (!child.hasType("Layer")) { params = child.createCopy(); continue; }
-        const int i = child["index"];
-        const auto* mb = child["flac"].getBinaryData();
-        if (i < 0 || i > 3 || mb == nullptr) continue;
-        auto flacCopy = std::make_shared<juce::MemoryBlock>(*mb);
-        juce::FlacAudioFormat flac;
-        std::unique_ptr<juce::AudioFormatReader> r(flac.createReaderFor(new juce::MemoryInputStream(*flacCopy, false), true));
-        if (r == nullptr) continue;
-        const int n = (int) r->lengthInSamples, chans = (int) r->numChannels;
-        juce::AudioBuffer<float> buf(chans, n);
-        r->read(&buf, 0, n, 0, true, true);
-        fz::Channels audio((size_t) chans);
-        for (int c = 0; c < chans; ++c) audio[(size_t) c].assign(buf.getReadPointer(c), buf.getReadPointer(c) + n);
-        setSource(i, child["name"].toString(), std::move(audio), flacCopy);
+        if (child.hasType("Audio")) continue;
+        if (child.hasType("Layer")) {
+            const int i = child["index"];
+            const auto s = sourceOf(child);
+            if (i >= 0 && i <= 3 && s.audio != nullptr) setSourceShared(i, s.name, s.audio, s.flac, s.origin);
+        } else if (child.hasType("Take")) {
+            Take t;
+            t.id = child["id"];
+            t.name = child["name"].toString();
+            t.created = (juce::int64) (double) child["created"];
+            t.project = child["project"].toString();
+            t.request = juce::JSON::parse(child["request"].toString());
+            t.samples = child["samples"];
+            t.peak = child["peak"];
+            if (const auto* th = child["thumb"].getBinaryData()) t.thumb.assign((const uint8_t*) th->getData(), (const uint8_t*) th->getData() + th->getSize());
+            t.thumbCols = child["thumbCols"];
+            t.thumbRows = child["thumbRows"];
+            if (const auto* mb = child["flac"].getBinaryData()) t.flac = std::make_shared<juce::MemoryBlock>(*mb);
+            for (const auto& l : child) {
+                const int i = l["index"];
+                if (l.hasType("TakeLayer") && i >= 0 && i <= 3) t.sources[(size_t) i] = sourceOf(l);
+            }
+            maxId = std::max(maxId, t.id);
+            std::lock_guard lock(mutex_);
+            takes_.push_back(std::move(t));
+        } else {
+            params = child.createCopy();
+        }
+    }
+    {
+        std::lock_guard lock(mutex_);
+        nextTakeId_ = std::max((int) root.getProperty("nextTake", 1), maxId + 1);
     }
     setProject(root["project"].toString());
     const auto request = juce::JSON::parse(root["request"].toString());

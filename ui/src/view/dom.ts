@@ -51,6 +51,8 @@ export const ICONS = {
   eject: '<path d="M3 9.5h10L8 3.5zM3 12.5h10"/>',
   display: '<path d="M2 13h12M3 11V8M6 11V4M9 11V6M12 11V3"/>',
   fresh: '<path d="M4 2h5l3 3v9H4zM9 2v3h3M6.5 9.5h3M8 8v3"/>',
+  keep: '<path d="M4 2h8v12l-4-3-4 3z"/>',
+  takes: '<path d="M2 4h9M2 8h9M2 12h6M13 3v5M13 11v2"/>',
 };
 
 export function screws(): HTMLElement[] {

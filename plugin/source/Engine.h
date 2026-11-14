@@ -37,11 +37,12 @@ public:
     ~Engine();
 
     // ---- sources (any thread). Info: {name, samples, channels}
-    juce::var setSource(int layer, const juce::String& name, fz::Channels audio, std::shared_ptr<juce::MemoryBlock> flac = {});
-    juce::var sourceInfo(int layer) const;
+    /// origin: the take this sound came from (0 = a file or a recording).
+    juce::var setSource(int layer, const juce::String& name, fz::Channels audio, std::shared_ptr<juce::MemoryBlock> flac = {}, int origin = 0);
+    juce::var sourceInfo(int layer) const;   // {name, samples, channels, origin}
     void decodeBytes(int layer, juce::MemoryBlock bytes, const juce::String& name, Done done);
     void decodeFile(int layer, const juce::File& file, Done done);
-    juce::var resultToLayer(int layer, const juce::String& name);
+    juce::var resultToLayer(int layer, const juce::String& name, int origin = 0);
     void clearSource(int layer);
     void clearResult();
 
@@ -59,6 +60,19 @@ public:
     juce::File resultWavFile() const;                      // last render as a WAV (for drag & drop)
     bool writeResultWav(const juce::File& file) const;
 
+    // ---- takes: kept results with their recipe (the four sources and the UI project), so any
+    // of them can be heard, restored or sent to a layer again (iteration history).
+    // Info: {id, name, created, duration, op, thumb: {key, cols, rows}, layers: [{name, origin} | null ×4]}
+    static constexpr int kMaxTakes = 24;
+    static constexpr int kTakePreview = 9;                  // Sampler preview "layer" of a take
+    juce::var keepTake(const juce::String& project, const juce::String& name);
+    juce::var takes();
+    void restoreTake(int id, Done done);                    // → {project, layers, result} like loadProject
+    void deleteTake(int id);
+    void renameTake(int id, const juce::String& name);
+    void takeToLayer(int id, int layer, Done done);         // → source info
+    void previewTake(int id, Done done);
+
     // ---- project
     void setProject(const juce::String& json);
     juce::String project() const;
@@ -75,7 +89,27 @@ private:
         juce::String name;
         std::shared_ptr<const fz::Channels> audio;
         std::shared_ptr<juce::MemoryBlock> flac;   // encoded lazily, cached for saving
+        int origin = 0;                            // take id it came from
     };
+    struct Take {
+        int id = 0;
+        juce::String name, project;
+        juce::var request;                          // the render request (op, layers)
+        juce::int64 created = 0;                    // ms since 1970
+        std::array<Source, 4> sources;              // shares the audio with the layers
+        std::shared_ptr<const fz::Channels> result; // null until decoded after loading a project
+        std::shared_ptr<juce::MemoryBlock> flac;    // the result as FLAC, for saving
+        int samples = 0;
+        double peak = 0;
+        std::vector<uint8_t> thumb;
+        int thumbCols = 0, thumbRows = 0;
+    };
+    juce::var setSourceShared(int layer, const juce::String& name, std::shared_ptr<const fz::Channels> audio,
+                              std::shared_ptr<juce::MemoryBlock> flac, int origin);
+    void installResult(const std::shared_ptr<const fz::Channels>& y, double peak);
+    juce::var takeInfo(const Take& t);
+    std::shared_ptr<const fz::Channels> takeAudio(int id, juce::String* name = nullptr, std::shared_ptr<juce::MemoryBlock>* flac = nullptr);
+    static std::shared_ptr<const fz::Channels> decodeFlac(const juce::MemoryBlock& mb);
     std::shared_ptr<const fz::Channels> pitched(int layer, double semitones);
     juce::var finishDecode(int layer, juce::AudioFormatReader* reader, const juce::String& name);
     juce::String putBlob(const juce::String& prefix, std::vector<std::byte> data);
@@ -101,6 +135,8 @@ private:
     juce::uint64 renderGeneration_ = 0;
     std::atomic<juce::uint64> analyzeTicket_{0};
     juce::File resultWav_;
+    std::vector<Take> takes_;
+    int nextTakeId_ = 1;
 };
 
 } // namespace fzp

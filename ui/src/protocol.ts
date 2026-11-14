@@ -17,7 +17,9 @@ export type WorkerRequest =
   | { type: "clear"; id: number }
   | { type: "spectrogram"; req: number; id: number; pitch: number; grid: Grid; sr: number; axis: Axis }
   | { type: "render"; req: number; sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; axis: Axis }
-  | { type: "image"; req: number; sr: number; channels: Float32Array[]; axis: Axis }
+  | { type: "image"; req: number; sr: number; channels: Float32Array[]; axis: Axis; cols?: number; rows?: number }
+  /** A restored take: its audio becomes the result Spectral mode and the analysis read. */
+  | { type: "setResult"; channels: Float32Array[] }
   | { type: "layer"; req: number; sr: number; job: LayerJob }
   /** Spectral mode: the last render shifted by `semitones`, same length (window n). */
   | { type: "shift"; req: number; semitones: number; n: number }

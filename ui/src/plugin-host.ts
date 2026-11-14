@@ -6,7 +6,7 @@
 import type { Grid } from "./dsp/stft.ts";
 import type { Axis, SpectrogramImage, Analysis, AnalysisRequest } from "./dsp/spectrogram.ts";
 import type { LayerJob } from "./protocol.ts";
-import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo } from "./host.ts";
+import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo, TakeInfo } from "./host.ts";
 
 interface JuceBackend {
   emitEvent(id: string, payload: unknown): void;
@@ -17,6 +17,7 @@ declare global { interface Window { __JUCE__?: { backend: JuceBackend; initialis
 export const insidePlugin = (): boolean => typeof window !== "undefined" && !!window.__JUCE__?.backend;
 
 interface ImageRef { key: string; cols: number; rows: number; peakDbfs?: number; }
+type RawTake = Omit<TakeInfo, "thumb"> & { thumb: ImageRef | null };
 type Maybe<T> = T | { error: string };
 
 const CHUNK = 1536 * 1024; // raw bytes per upload call (2 MB of base64)
@@ -82,9 +83,27 @@ export class PluginHost implements Host {
   }
 
   async start(): Promise<Restored | null> {
-    const r = await this.call<{ project: string | null; layers: (SourceInfo | null)[]; result: Parameters<PluginHost["resultInfo"]>[0]; params: SamplerParams }>("loadProject");
-    return { project: r.project ?? null, layers: r.layers.map((l) => (l && typeof l === "object" ? l : null)), result: await this.resultInfo(r.result), params: r.params };
+    const r = await this.call<{ project: string | null; layers: (SourceInfo | null)[]; result: Parameters<PluginHost["resultInfo"]>[0]; params: SamplerParams; takes: RawTake[] }>("loadProject");
+    return {
+      project: r.project ?? null, layers: r.layers.map((l) => (l && typeof l === "object" ? l : null)), result: await this.resultInfo(r.result), params: r.params,
+      takes: await Promise.all((r.takes ?? []).map((t) => this.takeInfo(t))),
+    };
   }
+
+  // ---- takes
+  private async takeInfo(t: RawTake): Promise<TakeInfo> {
+    return { ...t, thumb: t.thumb && typeof t.thumb === "object" ? await this.image(t.thumb).catch(() => null) : null,
+      layers: t.layers.map((l) => (l && typeof l === "object" ? l : null)) };
+  }
+  async keepTake(project: string, name?: string): Promise<TakeInfo> { return this.takeInfo(await this.checked<RawTake>("keepTake", project, name ?? "")); }
+  async restoreTake(id: number): Promise<Restored> {
+    const r = await this.checked<{ project: string | null; layers: (SourceInfo | null)[]; result: Parameters<PluginHost["resultInfo"]>[0] }>("restoreTake", id);
+    return { project: r.project ?? null, layers: r.layers.map((l) => (l && typeof l === "object" ? l : null)), result: await this.resultInfo(r.result), params: null };
+  }
+  deleteTake(id: number): void { void this.call("deleteTake", id); }
+  renameTake(id: number, name: string): void { void this.call("renameTake", id, name); }
+  takeToLayer(id: number, layer: number): Promise<SourceInfo> { return this.checked<SourceInfo>("takeToLayer", id, layer); }
+  async previewTake(id: number): Promise<void> { await this.checked("previewTake", id); }
 
   async examples(): Promise<Float32Array[]> { return []; }
   setSourceAudio(): SourceInfo { throw new Error("not available in the plugin"); }
@@ -122,7 +141,7 @@ export class PluginHost implements Host {
     return (await this.resultInfo(r))!;
   }
 
-  resultToLayer(i: number, name: string): Promise<SourceInfo> { return this.checked<SourceInfo>("resultToLayer", i, name); }
+  resultToLayer(i: number, name: string, origin = 0): Promise<SourceInfo> { return this.checked<SourceInfo>("resultToLayer", i, name, origin); }
   preview(_i: number, job: LayerJob, original: boolean): Promise<{ peak: number }> { return this.checked<{ peak: number }>("preview", job, original); }
   setPreviewOriginal(on: boolean): void { void this.call("setPreviewOriginal", on); }
   stopPreview(): void { void this.call("stopPreview"); }

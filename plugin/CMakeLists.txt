@@ -23,7 +23,7 @@ else()
 endif()
 
 juce_add_plugin(Fourierizer
-    VERSION                 0.6.0
+    VERSION                 0.7.0
     COMPANY_NAME            "waves_p"
     BUNDLE_ID               "com.wavesp.fourierizer"
     PLUGIN_MANUFACTURER_CODE Wvsp
