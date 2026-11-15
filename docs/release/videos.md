@@ -1,56 +1,75 @@
-# Videos de lanzamiento: guion (borrador 1)
+# Videos de lanzamiento: guion (borrador 2)
 
-Dos piezas:
+**Cambios respecto al borrador 1** (notas del autor, 2026-11-15):
 
-1. **Trailer** horizontal (16:9, 1920 × 1080, 60 fps), unos 2:30, para YouTube.
-2. **Story** vertical (9:16, 1080 × 1920), 30 s, para Instagram.
+- **El gancho** ya no es "convierte cualquier sonido en un instrumento". Es lo que hace único a Fourierizer: sonidos nuevos, que difícilmente se conseguirían de otra forma, hechos al recortar y mezclar sonidos que ya existen.
+- **Solo la pantalla del sintetizador.** No hay tomas de manos ni de instrumentos; cuando algo se toca, se ve en la interfaz (teclas, cabezal, espectrograma).
+- **La música** está hecha solo con los sonidos que el video crea en pantalla, para que el soundtrack sea en sí la demostración.
+- **Inglés, sin voz.** Solo subtítulos.
 
-**Hilo de las dos:** "cualquier sonido se puede ver, recortar y tocar". La música es **tu beat hecho con Fourierizer**, la definición de terminado de la v2.0, así que el video también la demuestra.
+Siguen dos piezas:
 
-**Estilo visual:** el de la app. Chasis claro, tinta negra, los cuatro colores de capa como único acento, tipografía Archivo (títulos) e IBM Plex Mono (datos y subtítulos). Nada de efectos brillantes: cortes secos, algún zoom lento y texto que aparece como lectura de un instrumento ("0.958 s · 775 Hz · G5 −21¢").
+1. **Trailer** horizontal (16:9, 1920 × 1080, 60 fps), unos 2:30.
+2. **Story** vertical (9:16, 1080 × 1920), 30 s.
 
----
+**Estilo:** el de la app. Chasis claro, tinta, los cuatro colores de capa como único acento, Archivo para los títulos e IBM Plex Mono para los subtítulos y datos; cortes secos.
+
+## El gancho (opciones)
+
+1. **"Sounds that don't exist yet are hiding inside the ones you already have."**
+2. **"Cut sounds apart in time and frequency. Rebuild them into something new."**
+3. **"Not a filter. Not a sampler. A way to make sounds you can't get any other way."**
+
+Recomiendo la 1 para abrir el trailer y la 3, más corta, para la story.
+
+## La idea central: transformaciones "A → nuevo"
+
+Cada bloque del video es una **transformación**. Se ve y se oye la fuente (o las fuentes), cómo se selecciona y el sonido nuevo que sale. Un subtítulo de una línea dice el truco. Las candidatas:
+
+| # | Fuentes | Lo que se hace | Subtítulo |
+|---|---|---|---|
+| T1 | Lluvia | Tres peines armónicos sobre el ruido de la lluvia, en las notas de un acorde | *Rain, tuned to a chord.* |
+| T2 | Voz cantada | Peine en *Odd*: solo los armónicos impares | *A voice made hollow: only its odd harmonics.* |
+| T3 | Piano + break de batería | *Cross*: el cuerpo del piano con el movimiento del break | *A piano that moves like a drum break.* |
+| T4 | Platillo + campana | Solo el ataque del platillo (rectángulo corto) sobre la cola de la campana (lazo) | *The attack of one sound, the tail of another.* |
+| T5 | Un resultado anterior | *Send to layer* y una selección sobre él (la toma muestra su linaje) | *Then select from what you made.* |
+| T6 | Un sonido grabado del mixer | Capture con START ON SIGNAL y la varita sobre lo grabado | *Record anything from your mixer.* |
+
+Se eligen las 4–5 que mejor suenen una vez hechas.
 
 ## 1. Trailer (≈ 2:30)
 
-| Tiempo | Imagen | Audio | Texto en pantalla |
+| Tiempo | Imagen | Audio | Subtítulo |
 |---|---|---|---|
-| 0:00–0:06 | Negro. Un espectrograma de voz se dibuja de izquierda a derecha con el cabezal. | La voz sola, seca. | — |
-| 0:06–0:12 | Zoom out: es una capa de Fourierizer. Aparece el logotipo. | Entra un golpe grave del beat. | **FOURIERIZER** · *Time–frequency selection synth* |
-| 0:12–0:24 | Se arrastran cuatro sonidos a las cuatro capas (piano, break, voz, lluvia); cada espectrograma aparece. | Cada sonido suena un instante al caer. | "Cualquier sonido es una imagen." |
-| 0:24–0:50 | **Seleccionar.** Primeros planos de cuatro gestos: un rectángulo sobre el piano, un lazo sobre la voz, *Harmonics* tomando una nota con sus armónicos (y el cambio a *Odd*), *Wand* tomando un golpe del break. | Cada selección se escucha sola (▶ de la capa): el contraste entre "todo" y "lo seleccionado". | La herramienta en mono: `RECT`, `LASSO`, `HARMONICS · ODD`, `WAND` |
-| 0:50–1:08 | **Fourierize.** Se dibuja el resultado. Cambio de operación Sum → Max → Cross con el espectrograma del resultado transformándose. | El resultado; cada operación suena distinta. | "Recorta. Combina." |
-| 1:08–1:30 | **Tocarlo.** Pantalla dividida: tus manos en el MPK (video tuyo) y el cabezal recorriendo el resultado; cambio de Tape a Spectral y de Tonal a Punchy. | Acordes con el sonido nuevo; Tape vs Spectral en las mismas teclas. | "Tócalo." · `TAPE` / `SPECTRAL` |
-| 1:30–1:48 | **Iterar.** Keep → Send to layer → una selección sobre el resultado → el panel Takes con el linaje ("3 ← Take 2"). | La segunda generación del sonido. | "Vuelve a empezar desde lo que hiciste." |
-| 1:48–2:05 | **Capture.** FL Studio: Capture en una pista, START ON SIGNAL, tú tocando un instrumento o sinte; el archivo aparece en el menú ⤓ de una capa. | Lo que grabas, y luego seleccionado. | "Graba desde tu mixer." |
-| 2:05–2:15 | **Ver de cerca.** El análisis del resultado con zoom; Resolution Multi en el break (los golpes se afilan). | Un fragmento del beat. | `ANALYSIS` · `MULTI-RES` |
-| 2:15–2:30 | **El beat.** Tu beat completo, con planos rápidos de las capas que lo forman; cierre en el logotipo. | El beat. | **FOURIERIZER** · "Gratis · Código abierto · Windows y macOS · VST3 + app" · enlace |
+| 0:00–0:10 | Negro. Un espectrograma se dibuja con el cabezal; zoom lento. | El sonido nuevo más llamativo (por ejemplo T1). | Gancho 1 |
+| 0:10–0:16 | Zoom out a la interfaz completa. Logotipo. | Corte seco. | **FOURIERIZER** · *Time–frequency selection synth* |
+| 0:16–0:28 | Cuatro sonidos cayendo en las capas; aparecen sus espectrogramas. | Cada fuente, un instante. | *Every sound is an image of time and frequency.* |
+| 0:28–1:40 | **Transformaciones T1–T4**, unos 18 s cada una: fuente → herramienta → resultado. Cada una cierra con el espectrograma del resultado en el módulo Result. | Fuente sola → resultado. | El de cada transformación |
+| 1:40–1:55 | **Tocar**: el teclado de la app y el cabezal sobre el resultado; cambio de Tape a Spectral. | Una frase tocada con el sonido de T1 o T3. | *Every result is an instrument.* |
+| 1:55–2:08 | **T5** (iterar) y vista Takes. | La segunda generación. | *Then select from what you made.* |
+| 2:08–2:15 | **T6**, la ventana de Capture. | — | *Record anything from your mixer.* |
+| 2:15–2:30 | **La pieza**: la música hecha solo con los sonidos anteriores, con cortes al ritmo entre los espectrogramas que la forman. Cierre en el logotipo. | La pieza. | **FOURIERIZER** · *Free and open source · Windows & macOS · VST3 + app* · enlace |
 
 ## 2. Story (30 s)
 
-Pensada para verse sin sonido, y mejor con sonido. El texto es grande y se lee en 1 s.
-
-| Tiempo | Imagen (vertical) | Audio | Texto |
+| Tiempo | Imagen (vertical: recortes y acercamientos de la interfaz) | Audio | Subtítulo |
 |---|---|---|---|
-| 0–2 s | Un espectrograma en vertical (el tiempo hacia abajo), muy cerca, dibujándose. | Un golpe del beat. | **"Convierte cualquier sonido en un instrumento."** |
-| 2–8 s | Cae un sonido en una capa (recorte vertical de la UI); un lazo lo rodea. | El sonido, luego solo lo seleccionado. | "Selecciónalo." |
-| 8–14 s | *Harmonics* sobre una nota, cambio a *Odd*. | El cambio de timbre. | "Quédate con sus armónicos." |
-| 14–22 s | Tus manos en el MPK y el resultado tocándose. | Acordes. | "Tócalo." |
-| 22–27 s | Entra el beat; cortes al ritmo entre capas. | El beat. | — |
-| 27–30 s | Logotipo sobre el chasis. | Final del beat. | **FOURIERIZER** · "Gratis · link en bio" |
+| 0–3 s | Espectrograma muy cerca, dibujándose. | El sonido de T1. | Gancho 3 |
+| 3–10 s | T1: la lluvia → los peines → la lluvia afinada. | Fuente → resultado. | *Rain, tuned to a chord.* |
+| 10–17 s | T3: piano + break → Cross. | Fuente → resultado. | *A piano that moves like a drum break.* |
+| 17–26 s | La pieza, con cortes al ritmo. | La pieza. | — |
+| 26–30 s | Logotipo sobre el chasis. | Final. | **FOURIERIZER** · *Free · link in bio* |
 
----
+## Producción
 
-## Cómo se produce
+- **Pantalla:** la app real, grabada por un guion automático (puppeteer) que hace cada gesto con tiempos exactos; se añade un cursor dibujado. Se puede repetir hasta que quede perfecto.
+- **Audio:** sale del mismo motor del plugin, renderizado, no grabado de la tarjeta de sonido, así que queda sincronizado al cuadro con la imagen. Las fuentes y los resultados son reales.
+- **La pieza final:** está hecha con los sonidos del video (ver la pregunta 2).
+- **Edición:** ffmpeg, a partir de un guion de tiempos; títulos con las tipografías de la app; el formato vertical se arma con recortes de la interfaz.
 
-- **Pantalla:** grabada de forma automática con la app real. Un guion de puppeteer hace cada gesto con tiempos exactos y guarda los cuadros; se le añade un cursor dibujado, porque la captura no lo incluye. Todo se puede repetir hasta que quede bien, sin grabar a mano.
-- **Audio exacto:** los resultados y las notas se generan con el mismo motor del plugin, sin grabar la tarjeta de sonido, así que imagen y sonido quedan sincronizados al cuadro.
-- **Edición:** con ffmpeg, a partir de un guion de tiempos. Los textos se componen con las tipografías de la app. El formato vertical recorta y acerca partes de la UI, no la encoge entera.
-- **Lo que solo tú puedes poner:** el beat y, si quieres, los clips de tus manos.
+## Lo que falta decidir
 
-## Lo que necesito de ti
-
-1. **Idioma del texto en pantalla:** español, inglés o los dos (por ejemplo, el trailer en inglés y la story en español).
-2. **El beat:** de 30 a 60 s, hecho con sonidos fourierizados. Si es posible, también los 2–4 sonidos fuente que usaste, porque saldrán en pantalla y deben ser tuyos o libres de derechos.
-3. **¿Clips tuyos?** Tus manos en el MPK y, para la parte de Capture, tocando algo. Un teléfono en vertical u horizontal sirve.
-4. **El enlace del final:** el repositorio, una página de descarga o tu perfil.
+1. **Las fuentes.** Hacen falta 6–8 sonidos reales (lluvia, voz cantada, piano, break, platillo, campana…) que se puedan mostrar en un video público. Pueden ser grabaciones tuyas o muestras libres de derechos de tu biblioteca. Si no tienes alguna, puedo buscar opciones en dominio público (CC0) para que las apruebes.
+2. **La pieza final.** O la produces tú con los sonidos que te exporto de cada transformación (es lo que más te representa), o la arreglo yo a partir de esos sonidos, con secuencias renderizadas por el motor del plugin, y tú la apruebas.
+3. **El gancho:** 1, 2, 3 u otro.
+4. **El enlace del final.**
