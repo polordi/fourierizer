@@ -17,7 +17,7 @@ juce_add_plugin(FourierizerSpike
     IS_MIDI_EFFECT          FALSE
     VST3_CATEGORIES         Instrument Synth
     NEEDS_WEBVIEW2          TRUE
-    COPY_PLUGIN_AFTER_BUILD TRUE
+    COPY_PLUGIN_AFTER_BUILD ${FZ_COPY_PLUGINS}
     VST3_COPY_DIR           "${FZ_VST3_COPY_DIR}")
 
 juce_add_binary_data(FourierizerSpikeUI

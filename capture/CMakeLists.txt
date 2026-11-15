@@ -18,7 +18,7 @@ juce_add_plugin(FourierizerCapture
     NEEDS_MIDI_OUTPUT       FALSE
     IS_MIDI_EFFECT          FALSE
     VST3_CATEGORIES         Fx Tools
-    COPY_PLUGIN_AFTER_BUILD TRUE
+    COPY_PLUGIN_AFTER_BUILD ${FZ_COPY_PLUGINS}
     VST3_COPY_DIR           "${FZ_VST3_COPY_DIR}")
 
 target_sources(FourierizerCapture PRIVATE

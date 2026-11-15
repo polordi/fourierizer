@@ -27,6 +27,8 @@ FetchContent_Declare(JUCE
 FetchContent_MakeAvailable(JUCE)
 
 # ---- Where built plugins are copied ---------------------------------------------------------
+# OFF when an installed (release) Fourierizer is on the machine: a dev copy would show up twice.
+option(FZ_COPY_PLUGINS "Copy built VST3 plugins to the per-user VST3 folder" ON)
 # Per-user VST3 folder (no admin rights needed). Add it once to FL Studio's plugin search paths.
 if(WIN32)
     file(TO_CMAKE_PATH "$ENV{LOCALAPPDATA}/Programs/Common/VST3" FZ_VST3_COPY_DIR)

@@ -25,17 +25,26 @@ Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-ar
 $env:Path = "$env:Path;" + [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 
 $buildDir = Join-Path $repo "build\$($Config.ToLower())"
+
+# An installed release (installer) lives in Common Files\VST3: then do not copy dev builds next to
+# it (FL Studio would list the plugin twice) and do not install the dev app.
+$released = Test-Path "$env:CommonProgramFiles\VST3\Fourierizer.vst3"
+$copy = if ($released) { "OFF" } else { "ON" }
 # Native tools (git, cmake) write progress to stderr; in Windows PowerShell 5.1 that must not
 # count as a failure. Judge them by their exit code instead.
 $ErrorActionPreference = "Continue"
-cmake -S $repo -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config"
+cmake -S $repo -B $buildDir -G Ninja "-DCMAKE_BUILD_TYPE=$Config" "-DFZ_COPY_PLUGINS=$copy"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
 cmake --build $buildDir --parallel
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 $ErrorActionPreference = "Stop"
 
 Write-Host "`nBuilt in $buildDir" -ForegroundColor Green
-Write-Host "VST3 copied to $env:LOCALAPPDATA\Programs\Common\VST3"
-
-# The Standalone app, for using Fourierizer without a DAW (Start menu > Fourierizer).
-if ($Config -eq "Release") { & (Join-Path $PSScriptRoot "install-standalone.ps1") }
+if ($released) {
+    Write-Host "An installed Fourierizer was found in Common Files\VST3: the dev build was NOT copied or installed." -ForegroundColor Yellow
+    Write-Host "Test it from build\$($Config.ToLower())\plugin\Fourierizer_artefacts (or uninstall the release to go back)."
+} else {
+    Write-Host "VST3 copied to $env:LOCALAPPDATA\Programs\Common\VST3"
+    # The Standalone app, for using Fourierizer without a DAW (Start menu > Fourierizer).
+    if ($Config -eq "Release") { & (Join-Path $PSScriptRoot "install-standalone.ps1") }
+}
