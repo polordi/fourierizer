@@ -1,3 +1,143 @@
 \chapter{Transformaciones: tono y tiempo}\label{cap:transformaciones}
 
-\enproceso{Remuestreo de banda limitada (interpolación sinc, filtros polifásicos); el modo Tape (tono y duración acoplados); el phase vocoder, la \emph{phasiness} y el bloqueo de fase de Laroche–Dolson para el modo Spectral; transientes.}
+Para tocar un sonido en distintas teclas hay que cambiar su altura. Hay dos maneras, y
+corresponden a los dos modos del sampler de Fourierizer. \emph{Tape} cambia la velocidad: el tono y
+la duración cambian juntos, como en una cinta. \emph{Spectral} cambia el tono y conserva la
+duración. Este capítulo explica las dos, y por qué la segunda es mucho más difícil.
+
+\section{Tape: remuestrear}
+
+Transponer $s$ semitonos al estilo cinta es leer la señal a otra velocidad. Con
+$r=2^{s/12}$, la salida es
+\[
+  y[j]=x(jr),
+\]
+donde $x(\cdot)$ es la señal ``continua'' que interpolan las muestras. Doce semitonos arriba,
+$r=2$: se lee el doble de rápido, todo suena una octava arriba y dura la mitad.
+
+El teorema de muestreo (\cref{cap:fourier}) dice cómo interpolar sin inventar nada: con la función
+$\mathrm{sinc}(u)=\sin(\pi u)/(\pi u)$,
+\[
+  x(\tau)=\sum_{n}x[n]\,\mathrm{sinc}(\tau-n).
+\]
+Si $r>1$, leer más rápido sube todas las frecuencias por un factor $r$, y lo que estaba por encima
+de $\Fs/(2r)$ rebasaría Nyquist y se \emph{doblaría} (aliasing). Por eso, al acortar, la sinc se
+ensancha por $r$ para filtrar antes a la nueva Nyquist:
+\[
+  y[j]=f_c\sum_n x[n]\,\mathrm{sinc}\bigl(f_c(jr-n)\bigr),\qquad f_c=\min(1,1/r).
+\]
+
+La suma infinita se trunca con una ventana de Kaiser (\cref{cap:ventanas}) de $24$ cruces por cero
+por lado, con $\beta=8$, y el núcleo se lee de una tabla de $512$ puntos por cruce con interpolación
+lineal~\cite{smith2011}. Es el mismo remuestreador que convierte los archivos de $44.1$ a $48$ kHz al
+importarlos, y el que usa el \emph{Pitch} de cada capa.
+
+\begin{estudio}
+\textbf{Tape tiene carácter.} Las notas agudas son más cortas y más "apretadas", y las graves más
+lentas y oscuras. Es el sonido de los samplers clásicos y suele ser lo mejor para baterías y
+golpes: el ataque se conserva intacto, solo que más rápido o más lento.
+\end{estudio}
+
+\section{Spectral: cambiar el tono sin cambiar la duración}
+
+Fourierizer lo hace en dos pasos, los dos sin aliasing:
+\begin{enumerate}
+  \item \textbf{Estirar} la señal $r$ veces en el tiempo \emph{sin cambiar su tono}, con un
+        \emph{phase vocoder}.
+  \item \textbf{Remuestrear} por $r$ como en Tape. Leer la señal estirada $r$ veces más rápido
+        regresa la duración original y multiplica todas las frecuencias por $r$.
+\end{enumerate}
+Lo difícil es el primer paso.
+
+\subsection{El phase vocoder}
+
+Para estirar, se analiza la señal con fragmentos separados por un salto $H_a$ y se resintetiza con
+fragmentos separados por $H_s=rH_a$. Si solo se cambiaran las posiciones, cada parcial volvería a
+empezar su fase en cada fragmento y las sumas se cancelarían: el resultado sonaría como un
+temblor. La fase de cada coeficiente tiene que \emph{avanzar} entre fragmentos de síntesis lo que
+avanzaría la parcial en $H_s$ muestras:
+\[
+  \phi^{\text{s}}_{j}(k)=\phi^{\text{s}}_{j-1}(k)+H_s\,\omega_k,
+\]
+donde $\omega_k$ es la \emph{frecuencia instantánea} de lo que suena en el bin $k$, en radianes
+por muestra~\cite{flanagan1966}. El bin solo dice que la frecuencia está \emph{cerca} de
+$\theta_k=2\pi k/N$. La precisa se mide con la fase.
+
+\begin{proposicion}[Frecuencia instantánea]\label{prop:frecuencia-instantanea}
+Sea $x[n]=A\cos(\theta_0n+\phi)$ y sean $\chi_a(k)$ y $\chi_{a-\delta}(k)$ los coeficientes de dos
+fragmentos analizados en las posiciones $a$ y $a-\delta$. Si $|\theta_0-\theta_k|<\pi/\delta$ y la
+contribución de la frecuencia negativa es despreciable, entonces
+\[
+  \theta_0=\theta_k+\frac{1}{\delta}\,\mathrm{princarg}\Bigl(\angle\chi_a(k)-\angle\chi_{a-\delta}(k)-\theta_k\delta\Bigr),
+\]
+donde $\mathrm{princarg}$ lleva un ángulo a $[-\pi,\pi)$.
+\end{proposicion}
+
+\begin{proof}
+Por el \cref{cor:parcial}, $\chi_a(k)\approx\tfrac A2\,\e^{\iu(\theta_0 a'+\phi)}\,W(\theta_k-\theta_0)$, donde
+$a'$ es el inicio del fragmento. El factor $W$ es el mismo para los dos fragmentos (misma ventana,
+mismo bin), así que la diferencia de fases es $\theta_0\delta$ módulo $2\pi$. Es decir,
+$\theta_0\delta=\Delta\phi+2\pi j$ para algún entero $j$. Escribimos
+$\theta_0\delta=\theta_k\delta+(\theta_0-\theta_k)\delta$: como $|(\theta_0-\theta_k)\delta|<\pi$,
+el término $(\theta_0-\theta_k)\delta$ es justamente el representante en $[-\pi,\pi)$ de
+$\Delta\phi-\theta_k\delta$. Despejando se obtiene la fórmula.
+\end{proof}
+
+En los vocoders clásicos, $\delta$ es el propio salto de análisis. Fourierizer mide la frecuencia
+con un segundo fragmento a $\delta=N/8$ muestras, \emph{independiente} de $H_a$. Así la
+estimación es válida en $|\theta_0-\theta_k|<\pi/\delta$, es decir, a menos de $N/(2\delta)=4$ bins
+del centro, lo que cubre el lóbulo principal de Hann. El salto de análisis puede ser cualquiera,
+incluso mayor que la ventana, como ocurre al transponer hacia abajo.
+
+\subsection{Phasiness y phase locking}
+
+Si cada bin avanza su fase por su cuenta, los bins del lóbulo principal de una misma parcial
+pierden la relación de fase que tenían en el análisis. La parcial se ``despega'' de sí misma y el
+resultado suena difuso y metálico: es la \emph{phasiness}. Laroche y Dolson propusieron
+\emph{amarrar} las fases~\cite{laroche1999}:
+\begin{enumerate}
+  \item Se buscan los picos de la magnitud, es decir, los bins mayores que sus dos vecinos de cada
+        lado.
+  \item Solo los picos propagan su fase con la frecuencia instantánea.
+  \item Cada bin gira \emph{el mismo ángulo} que el pico más cercano. Si el pico pasa de
+        $\angle\chi$ a $\phi^{\text{s}}$, todos los bins de su región se multiplican por
+        $\e^{\iu(\phi^{\text{s}}-\angle\chi_{\text{pico}})}$.
+\end{enumerate}
+Así, el lóbulo principal de cada parcial se mueve en bloque y conserva su forma.
+
+En estéreo, Fourierizer calcula esas rotaciones una sola vez, sobre la señal media $L+R$, y aplica
+la misma a los dos canales. Como cada bin de cada canal gira lo mismo, las diferencias de fase entre
+canales (la imagen estéreo) se conservan.
+
+\subsection{Transientes}
+
+El phase vocoder estira bien lo que es estable. Un ataque, en cambio, cae dentro de varios
+fragmentos de síntesis que se superponen, y se reparte en el tiempo: aparece un \emph{pre-eco} antes
+del golpe y el ataque pierde filo. El fenómeno es del orden de la ventana. En un tren de clicks
+transpuesto $+7$ semitonos, el pre-eco medido fue de $-21\dB$ con $N=4096$, $-28\dB$ con $2048$ y
+$-39\dB$ con $1024$. Por eso la ventana del modo Spectral es una elección del usuario: \emph{Tonal}
+($4096$), \emph{Mixed} ($2048$) o \emph{Punchy} ($1024$). Una alternativa que se evaluó, reiniciar
+las fases en los ataques, apenas mejoró la medición, así que se descartó.
+
+\section{Del algoritmo al instrumento}
+
+Un phase vocoder de alta calidad es demasiado costoso para correr nota por nota en tiempo real.
+Fourierizer aprovecha que el sonido a tocar (el resultado) ya está fijo. Calcula una copia por
+semitono de transposición, empezando por las notas que tocas y luego la octava alrededor del
+\emph{Root}, en dos hilos de fondo y con un presupuesto de memoria. Cada copia se produce por
+pedazos y se puede tocar mientras se termina: una nota nueva espera solo su primer pedazo, unos
+10 ms. El cálculo por pedazos da exactamente los mismos números que el cálculo completo, y los
+tres motores coinciden con la referencia en Python (\cref{cap:instrumento}).
+
+\begin{estudio}
+\textbf{Tape o Spectral.}
+\begin{itemize}
+  \item \emph{Tape} para baterías, golpes y todo lo que deba conservar el ataque intacto, o cuando
+        quieres el carácter de sampler clásico.
+  \item \emph{Spectral} para pads, texturas, voces y acordes: un pad de 20 s dura 20 s en cualquier
+        tecla. Con \emph{Tonal} los sostenidos quedan más limpios; con \emph{Punchy}, los ataques.
+  \item Lejos del Root (más de una octava), los dos modos se notan: Tape por la velocidad y
+        Spectral por un timbre algo más artificial. Elegir bien el Root ayuda más que cualquier
+        ajuste.
+\end{itemize}
+\end{estudio}

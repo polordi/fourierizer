@@ -1,3 +1,125 @@
 \chapter{Multirresolución}\label{cap:multirresolucion}
 
-\enproceso{Bancos de filtros con reconstrucción perfecta, una STFT por banda; la transformada de Gabor no estacionaria (NSGT) y la CQT invertible; qué se gana al oído.}
+El \cref{cap:stft} terminó con un dilema: una ventana larga separa las notas graves pero emborrona
+los ataques; una corta hace lo contrario, y ninguna ventana resuelve las dos cosas
+(\cref{tab:resolucion}). Sin embargo, los sonidos reales casi nunca necesitan las dos resoluciones
+\emph{en la misma frecuencia}. En los graves, los armónicos están muy juntos en hertz y lo que
+importa es separarlos. En los agudos están lejos entre sí, y lo que importa es la precisión
+temporal de los transientes (platillos, consonantes, ataques). La multirresolución usa ventanas
+distintas en zonas distintas del espectro.
+
+\section{Dos caminos}
+
+\begin{enumerate}
+  \item \textbf{Transformadas no estacionarias.} La transformada de Gabor no estacionaria (NSGT)
+        permite que la ventana cambie de forma continua con la frecuencia. Con ventanas
+        proporcionales a $1/f$ se obtiene una transformada de Q constante invertible, con la misma
+        resolución relativa en cada octava~\cite{velasco2011}. Es la solución más elegante, pero
+        cambia por completo la malla: los coeficientes ya no forman una tabla rectangular.
+  \item \textbf{Bandas.} Partir el espectro en unas cuantas bandas y analizar cada una con su
+        propia STFT. Es más tosco, pero conserva todo lo que ya sabemos de la STFT: marcos,
+        inversa de mínimos cuadrados y máscaras.
+\end{enumerate}
+
+Fourierizer sigue el segundo camino, con una simplificación: en vez de filtrar la señal antes de
+analizarla, \emph{la banda se incorpora a la máscara}.
+
+\section{Bandas como pesos en la máscara}
+
+Sea $\{w_b\}_{b=1}^{B}$ una familia de funciones de la frecuencia con
+\begin{equation}\label{eq:particion}
+  w_b(f)\ge0,\qquad \sum_{b=1}^{B}w_b(f)=1\quad\text{para toda } f,
+\end{equation}
+una \emph{partición de la unidad}. A cada banda le asociamos una malla $\mathcal G_b$, con su
+operador de análisis $\mathcal A_b$. La capa multirresolución es
+\begin{equation}\label{eq:multires}
+  y=\sum_{b=1}^{B}\mathcal A_b^{\dagger}\bigl((M\,w_b)\odot\mathcal A_b x\bigr),
+\end{equation}
+donde $M$ es la misma selección de siempre, rasterizada en cada malla. Es decir: cada banda es una
+resíntesis enmascarada normal, en su propia malla, con la selección multiplicada por el peso de esa
+banda.
+
+En Fourierizer hay tres bandas. La malla de cada una es la de la capa escalada por $4$, $1$ y
+$\tfrac14$, con la misma ventana, el mismo cociente $N/L$ y el mismo traslape $L/H$:
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+banda & frecuencias & ventana (con $N=4096$ en la capa) \\
+\midrule
+graves & por debajo de $\sim300\Hz$ & $16384$ ($341$ ms) \\
+medios & entre $\sim300\Hz$ y $\sim3\,\mathrm{kHz}$ & $4096$ ($85$ ms) \\
+agudos & por encima de $\sim3\,\mathrm{kHz}$ & $1024$ ($21$ ms) \\
+\bottomrule
+\end{tabular}
+\end{center}
+Los pesos cruzan con un coseno alzado en $\log_2 f$, de una octava de ancho y centrado en $f_c=300$ y
+$3000\Hz$:
+\[
+  r_{f_c}(f)=S\!\Bigl(\log_2\frac{f}{f_c}+\tfrac12\Bigr),\qquad
+  w_{\text{graves}}=1-r_{300},\quad w_{\text{medios}}=r_{300}-r_{3000},\quad w_{\text{agudos}}=r_{3000},
+\]
+con $S$ la subida de coseno de la \cref{sec:fades}. Como $r_{300}\ge r_{3000}$, los tres pesos son no
+negativos y suman $1$: cumplen \eqref{eq:particion}.
+
+\section{¿Se reconstruye la señal?}
+
+Con la selección completa ($M\equiv1$), una buena multirresolución debería devolver la señal. Para
+cada banda, $T_b x=\mathcal A_b^{\dagger}(w_b\odot\mathcal A_bx)$ aplica un peso que no depende del
+tiempo. Si la respuesta al impulso $h_b$ de $w_b$ (la transformada inversa del peso) es mucho más
+corta que la ventana de la malla $b$, cada fragmento ventaneado se convoluciona con $h_b$ casi sin
+notar los bordes de la ventana, y $T_bx\approx h_b*x$. En ese régimen,
+\[
+  \sum_b T_b x\approx\Bigl(\sum_b h_b\Bigr)*x=\delta*x=x,
+\]
+porque la suma de los pesos es $1$ y su transformada inversa es el impulso $\delta$.
+
+La condición ``$h_b$ corta'' equivale a que el peso varíe despacio en comparación con la resolución
+en frecuencia de la malla, que es el mismo criterio de consistencia del \cref{cap:stft}. Las
+transiciones de una octava se diseñaron para cumplirlo con holgura:
+\begin{center}\small
+\begin{tabular}{lccc}
+\toprule
+cruce & ancho de la transición & malla & ancho a $-6\dB$ (Hann) \\
+\midrule
+$300\Hz$  & $212$--$424\Hz$ ($212\Hz$)          & graves, $N=16384$ & $5.9\Hz$ \\
+          &                                      & medios, $N=4096$  & $23.4\Hz$ \\
+$3\,\mathrm{kHz}$ & $2.1$--$4.2\,\mathrm{kHz}$ ($2.1\,\mathrm{kHz}$) & medios, $N=4096$ & $23.4\Hz$ \\
+          &                                      & agudos, $N=1024$  & $93.8\Hz$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+En todos los casos, la transición es al menos veinte veces más ancha que el lóbulo principal. En
+la prueba del motor de referencia (ruido y dos tonos, Hann con $N=1024$), las tres bandas
+reconstruyen la entrada con un error máximo menor al $2\,\%$ de su pico. Los tres motores de
+Fourierizer (Python, TypeScript y C++) coinciden entre sí al nivel del redondeo.
+
+\begin{observacion}
+La multirresolución aplica a la operación \emph{Sum}, donde cada capa se reconstruye por separado.
+Las operaciones \emph{Max}, \emph{Cross} y \emph{Product} (\cref{cap:operaciones}) comparan
+coeficientes de capas distintas celda por celda, así que necesitan una sola malla común.
+\end{observacion}
+
+\section{Cómo se dibuja}
+
+En el espectrograma de una capa multirresolución, cada renglón sale de la imagen de la banda cuyo
+peso domina esa frecuencia: los graves con la ventana larga y los agudos con la corta. Para que las
+tres imágenes se puedan pegar, los niveles se comparan en dBFS y no en la escala propia de cada
+imagen. Una parcial de amplitud $A$ que cae en el centro de un bin produce $|\chi|=A\sum_nw[n]/2$
+(\cref{cor:parcial}), que crece con el largo de la ventana. Dividir entre $\sum_nw[n]/2$ quita esa
+dependencia: la misma parcial mide lo mismo en las tres bandas. Las bandas largas se dibujan con
+el salto de la capa, de modo que el emborronamiento temporal que se ve es el de la ventana larga y
+no el de un muestreo grueso.
+
+\begin{estudio}
+\textbf{Cuándo usar \emph{Resolution: Multi}.}
+\begin{itemize}
+  \item \emph{Baterías completas, loops y mezclas.} El bombo y el bajo quedan separados en los
+        graves y los platillos conservan su ataque. Es el caso típico.
+  \item \emph{Voces.} Las consonantes (agudas y breves) quedan nítidas, sin perder la definición
+        de los armónicos de la vocal.
+  \item \emph{Pads y notas sostenidas aisladas.} Casi no hace falta: una sola ventana larga basta.
+\end{itemize}
+Cuesta unas tres veces más cálculo que una sola ventana, porque son tres resíntesis. Los cruces
+están fijos en $300\Hz$ y $3\,\mathrm{kHz}$. Si seleccionas justo sobre un cruce, recuerda que ahí
+suenan dos bandas a la vez, cada una con su resolución.
+\end{estudio}
