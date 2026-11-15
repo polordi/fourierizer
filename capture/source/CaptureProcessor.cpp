@@ -20,6 +20,7 @@ CaptureProcessor::~CaptureProcessor() {
     }
     timerCallback();
     disarm();
+    if (waitingRec_ != nullptr) { waitingRec_->writer.reset(); waitingRec_->file.deleteFile(); }
     writerThread_.stopThread(4000);
 }
 
@@ -31,6 +32,9 @@ bool CaptureProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const 
 void CaptureProcessor::prepareToPlay(double sampleRate, int) {
     const bool changed = std::abs(sampleRate - sampleRate_.load()) > 0.5;
     sampleRate_ = sampleRate;
+    preroll_.setSize(2, std::max(1, (int) (0.05 * sampleRate)));   // allocated here, never on the audio thread
+    preroll_.clear();
+    prerollPos_ = prerollFill_ = 0;
     if (changed) disarm();   // an armed file has the old rate in its header
 }
 
@@ -48,9 +52,38 @@ void CaptureProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Midi
     if (auto* ph = getPlayHead())
         if (const auto pos = ph->getPosition()) playing = pos->getIsPlaying();
     if (!playing) holdUntilStop_ = false;
+    float blockPeak = 0;
+    for (int c = 0; c < chans; ++c) blockPeak = std::max(blockPeak, buffer.getMagnitude(c, 0, n));
 
     const juce::SpinLock::ScopedTryLockType lock(lock_);
     if (!lock.isLocked()) return;   // the message thread is swapping recorders: skip this block
+
+    // Start on signal: wait for the threshold, then write the pre-roll and go on recording.
+    if (waitingRec_ != nullptr && chans > 0) {
+        if (blockPeak >= juce::Decibels::decibelsToGain(thresholdDb_.load())) {
+            active_ = std::move(waitingRec_);
+            recorded_ = 0;
+            byTransport_ = false;
+            waiting_ = false;
+            recording_ = true;
+            const int len = preroll_.getNumSamples(), start = (prerollPos_ - prerollFill_ + len) % len;
+            for (int done = 0; done < prerollFill_;) {   // oldest first, in up to two pieces
+                const int at = (start + done) % len, take = std::min(prerollFill_ - done, len - at);
+                const float* ptrs[2] = {preroll_.getReadPointer(0, at), preroll_.getReadPointer(chans > 1 ? 1 : 0, at)};
+                active_->writer->write(ptrs, take);
+                recorded_ += take;
+                done += take;
+            }
+            prerollFill_ = 0;
+        } else {   // keep the last 50 ms
+            const int len = preroll_.getNumSamples();
+            for (int i = std::max(0, n - len); i < n; ++i) {
+                for (int c = 0; c < 2; ++c) preroll_.setSample(c, prerollPos_, buffer.getSample(std::min(c, chans - 1), i));
+                prerollPos_ = (prerollPos_ + 1) % len;
+            }
+            prerollFill_ = std::min(len, prerollFill_ + n);
+        }
+    }
 
     auto stopActive = [&] {
         for (auto& d : done_)
@@ -104,6 +137,16 @@ std::unique_ptr<CaptureProcessor::Recorder> CaptureProcessor::makeRecorder() {
 }
 
 void CaptureProcessor::toggleRecord() {
+    if (waiting_) {   // cancel the wait: the prepared file is dropped
+        std::unique_ptr<Recorder> r;
+        {
+            const juce::SpinLock::ScopedLockType lock(lock_);
+            r = std::move(waitingRec_);
+            waiting_ = false;
+        }
+        if (r != nullptr) { r->writer.reset(); r->file.deleteFile(); }
+        return;
+    }
     if (recording_) {
         const juce::SpinLock::ScopedLockType lock(lock_);
         for (auto& d : done_)
@@ -122,6 +165,13 @@ void CaptureProcessor::toggleRecord() {
     }
     if (r == nullptr) r = makeRecorder();
     if (r == nullptr) return;
+    if (waitSignal_) {   // the audio thread starts it when the input crosses the threshold
+        const juce::SpinLock::ScopedLockType lock(lock_);
+        prerollFill_ = 0;
+        waitingRec_ = std::move(r);
+        waiting_ = true;
+        return;
+    }
     r->started = juce::Time::getCurrentTime();
     const juce::SpinLock::ScopedLockType lock(lock_);
     active_ = std::move(r);
@@ -197,13 +247,18 @@ void CaptureProcessor::updateTrackProperties(const TrackProperties& properties) 
 void CaptureProcessor::getStateInformation(juce::MemoryBlock& destData) {
     juce::ValueTree t("FourierizerCapture");
     t.setProperty("follow", follow_.load(), nullptr);
+    t.setProperty("waitSignal", waitSignal_.load(), nullptr);
+    t.setProperty("threshold", thresholdDb_.load(), nullptr);
     juce::MemoryOutputStream out(destData, false);
     t.writeToStream(out);
 }
 
 void CaptureProcessor::setStateInformation(const void* data, int sizeInBytes) {
     const auto t = juce::ValueTree::readFromData(data, (size_t) sizeInBytes);
-    if (t.hasType("FourierizerCapture")) setFollowTransport((bool) t["follow"]);
+    if (!t.hasType("FourierizerCapture")) return;
+    setFollowTransport((bool) t["follow"]);
+    setWaitForSignal((bool) t["waitSignal"]);
+    if (t.hasProperty("threshold")) setThresholdDb((float) t["threshold"]);
 }
 
 juce::AudioProcessorEditor* CaptureProcessor::createEditor() { return new CaptureEditor(*this); }

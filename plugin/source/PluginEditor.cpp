@@ -97,7 +97,7 @@ juce::WebBrowserComponent::Options FourierizerEditor::options() {
         .withNativeFunction("pickFile", [this](Args a, Completion done) { pickFile((int) a[0], std::move(done)); })
         .withNativeFunction("spectrogram", [this](Args a, Completion done) {
             try {
-                proc_.engine.spectrogram((int) a[0], (double) a[1], fzp::Engine::gridOf(a[2]), fzp::Engine::axisOf(a[3]), later(std::move(done)));
+                proc_.engine.spectrogram((int) a[0], (double) a[1], fzp::Engine::gridOf(a[2]), fzp::Engine::axisOf(a[3]), later(std::move(done)), a.size() > 4 ? a[4] : juce::var(), a.size() > 5 && (bool) a[5]);
             } catch (const std::exception& e) { done(obj({{"error", juce::String(e.what())}})); }
         })
         .withNativeFunction("render", [this](Args a, Completion done) { proc_.engine.render(a[0], later(std::move(done))); })

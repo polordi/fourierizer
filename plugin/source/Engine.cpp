@@ -254,12 +254,22 @@ std::optional<std::vector<std::byte>> Engine::blob(const juce::String& key) cons
 }
 
 // ------------------------------------------------------------------------------ jobs
-void Engine::spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done) {
-    run(pool_, "spectrogram", [this, layer, pitch, grid, axis, done] {
+void Engine::spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done, const juce::var& range, bool multires) {
+    run(pool_, "spectrogram", [this, layer, pitch, grid, axis, done, range, multires] {
         try {
             auto x = pitched(layer, pitch);
             if (x == nullptr) return done(errorVar("no audio in layer " + juce::String(layer + 1)));
-            const auto img = fz::spectrogramImage(fz::midOf(*x), kProjectRate, grid, 1400, 360, axis);
+            fz::SpectrogramImage img;
+            if (range.isObject()) {   // a zoomed view
+                const int cols = juce::jlimit(16, 4096, (int) num(range["cols"], 1400));
+                const long long s0 = std::llround(num(range["t0"]) * kProjectRate), s1 = std::max(s0 + 1, std::llround(num(range["t1"]) * kProjectRate));
+                const int maxHop = std::min(grid.H, std::max(16, (int) ((s1 - s0) / cols)));
+                fz::Grid g = grid;
+                g.H = std::max(16, std::min(grid.H, maxHop));
+                img = multires ? fz::multiresImage(fz::midOf(*x), kProjectRate, grid, cols, 360, axis, s0, s1, maxHop)
+                               : fz::spectrogramImage(fz::midOf(*x), kProjectRate, g, cols, 360, axis, s0, s1);
+            } else img = multires ? fz::multiresImage(fz::midOf(*x), kProjectRate, grid, 1400, 360, axis, 0, -1, grid.H)
+                                  : fz::spectrogramImage(fz::midOf(*x), kProjectRate, grid, 1400, 360, axis);
             const auto key = putBlob("spec" + juce::String(layer), toBytes(img.data));
             done(obj({{"key", key}, {"cols", img.cols}, {"rows", img.rows}, {"duration", (double) (*x)[0].size() / kProjectRate}}));
         } catch (const std::exception& e) { done(errorVar(e.what())); }
@@ -291,6 +301,7 @@ void Engine::runRender(const juce::var& request, std::shared_ptr<std::atomic<boo
                     fz::LayerInput in{*x, gridOf(l["grid"]), shapesOf(l["shapes"])};
                     in.featherS = num(l["featherS"], 0.01);
                     in.featherOct = num(l["featherOct"], 1.0 / 12);
+                    in.multires = (bool) l["multires"];
                     in.gainDb = num(l["gainDb"]);
                     in.offsetS = num(l["offsetS"]);
                     layers.push_back(std::move(in));
@@ -390,6 +401,7 @@ void Engine::preview(const juce::var& l, bool original, Done done) {
             fz::LayerInput in{*x, gridOf(l["grid"]), shapesOf(l["shapes"])};
             in.featherS = num(l["featherS"], 0.01);
             in.featherOct = num(l["featherOct"], 1.0 / 12);
+            in.multires = (bool) l["multires"];
             const auto y = fz::synthesizeLayer(in, kProjectRate);
             const double peakSel = fz::peakOf(y), peakOrig = fz::peakOf(*x), peak = std::max(peakSel, peakOrig);
             auto toBuffer = [](const fz::Channels& c) {

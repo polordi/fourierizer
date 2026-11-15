@@ -28,7 +28,12 @@ private:
     void timerCallback() override;
 
     CaptureProcessor& proc_;
-    Key rec_{"REC", false}, follow_{"RECORD WHILE PLAYING", true}, folder_{"OPEN FOLDER", false};
+    Key rec_{"REC", false}, follow_{"RECORD WHILE PLAYING", true}, signal_{"START ON SIGNAL", true}, folder_{"OPEN FOLDER", false};
+    juce::Rectangle<int> thresholdArea_;          // drag up/down (or the wheel) to change the threshold
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    float dragFrom_ = 0;
     float level_[2]{0, 0};
     juce::Rectangle<int> meterArea_, timeArea_, infoArea_;
 

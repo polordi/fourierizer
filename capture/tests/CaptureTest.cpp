@@ -123,6 +123,32 @@ int main(int argc, char** argv) {
     check(files.size() == 1 && std::abs(inspect(files[0]).first - expected) < 0.011, juce::String::formatted("one file of %.2f s", expected));
     for (auto& f : testFiles()) f.deleteFile();
 
+    std::puts("start on signal");
+    {
+        p.setWaitForSignal(true);
+        check(std::abs(p.thresholdDb() + 45.0f) < 0.01f, "default threshold -45 dB");
+        p.toggleRecord();
+        check(p.isWaiting() && !p.isRecording(), "REC waits");
+        juce::AudioBuffer<float> b(2, kBlock);
+        juce::MidiBuffer midi;
+        for (int k = 0; k < 100; ++k) {   // 1 s of quiet noise at about −66 dB: nothing happens
+            for (int c = 0; c < 2; ++c)
+                for (int i = 0; i < kBlock; ++i) b.setSample(c, i, 0.0005f * (float) std::sin(0.37 * (k * kBlock + i)));
+            p.processBlock(b, midi);
+        }
+        check(p.isWaiting() && !p.isRecording(), "quiet input does not start it");
+        phase = 0;
+        run(p, 1.0);   // the tone (−6 dB) starts it
+        check(p.isRecording() && !p.isWaiting(), "a note starts it");
+        p.toggleRecord();
+        pump(300);
+        files = testFiles();
+        const double len = files.isEmpty() ? -1 : inspect(files[0]).first;
+        check(files.size() == 1 && std::abs(len - 1.05) < 0.011, juce::String::formatted("1 s of tone + 50 ms before it (%.3f s)", len));
+        for (auto& f : testFiles()) f.deleteFile();
+        p.setWaitForSignal(false);
+    }
+
     std::puts("60 s limit");
     p.setFollowTransport(true);
     pump(200);

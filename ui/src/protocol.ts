@@ -9,13 +9,14 @@ import type { Axis, SpectrogramImage } from "./dsp/spectrogram.ts";
 export interface LayerJob {
   id: number; pitch: number; grid: Grid; shapes: Shape[];
   featherS: number; featherOct: number; gainDb: number; offsetS: number;
+  multires?: boolean;
 }
 
 export type WorkerRequest =
   | { type: "examples"; req: number; sr: number }
   | { type: "source"; id: number; channels: Float32Array[] }
   | { type: "clear"; id: number }
-  | { type: "spectrogram"; req: number; id: number; pitch: number; grid: Grid; sr: number; axis: Axis }
+  | { type: "spectrogram"; req: number; id: number; pitch: number; grid: Grid; sr: number; axis: Axis; range?: { t0: number; t1: number; cols: number }; multires?: boolean }
   | { type: "render"; req: number; sr: number; op: Op; a: number; b: number; layers: LayerJob[]; all: (LayerJob | null)[]; axis: Axis }
   | { type: "image"; req: number; sr: number; channels: Float32Array[]; axis: Axis; cols?: number; rows?: number }
   /** A restored take: its audio becomes the result Spectral mode and the analysis read. */

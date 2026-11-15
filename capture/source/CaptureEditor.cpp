@@ -54,6 +54,9 @@ CaptureEditor::CaptureEditor(CaptureProcessor& p) : juce::AudioProcessorEditor(p
     rec_.onClick = [this] { proc_.toggleRecord(); };
     follow_.setToggleState(proc_.followTransport(), juce::dontSendNotification);
     follow_.onClick = [this] { proc_.setFollowTransport(follow_.getToggleState()); };
+    signal_.setToggleState(proc_.waitForSignal(), juce::dontSendNotification);
+    signal_.onClick = [this] { proc_.setWaitForSignal(signal_.getToggleState()); repaint(); };
+    signal_.setTooltip("REC waits until the input goes above the threshold: press it, then play your instrument");
     folder_.onClick = [] {
         const auto f = fzshared::capturesFolder();
         f.createDirectory();
@@ -62,9 +65,9 @@ CaptureEditor::CaptureEditor(CaptureProcessor& p) : juce::AudioProcessorEditor(p
     rec_.setTooltip("Record what passes through this track (up to 60 s)");
     follow_.setTooltip("Start recording when FL starts playing and stop when it stops");
     folder_.setTooltip("Documents/Fourierizer/Captures: Fourierizer lists these files in each layer's load menu");
-    for (auto* k : {&rec_, &follow_, &folder_}) addAndMakeVisible(k);
+    for (auto* k : {&rec_, &follow_, &signal_, &folder_}) addAndMakeVisible(k);
     proc_.onCaptureSaved = [this] { repaint(); };
-    setSize(440, 200);
+    setSize(520, 236);
     startTimerHz(30);
 }
 
@@ -84,10 +87,15 @@ void CaptureEditor::resized() {
     meterArea_ = row.withSizeKeepingCentre(row.getWidth(), 22);
     r.removeFromTop(16);
     auto bottom = r.removeFromTop(34);
-    follow_.setBounds(bottom.removeFromLeft(208).withSizeKeepingCentre(208, 32));
+    signal_.setBounds(bottom.removeFromLeft(178).withSizeKeepingCentre(178, 32));
+    bottom.removeFromLeft(6);
+    thresholdArea_ = bottom.removeFromLeft(70);
     bottom.removeFromLeft(10);
-    folder_.setBounds(bottom.removeFromLeft(122).withSizeKeepingCentre(122, 32));
-    infoArea_ = r.withTrimmedTop(6);
+    follow_.setBounds(bottom.removeFromLeft(208).withSizeKeepingCentre(208, 32));
+    r.removeFromTop(8);
+    auto last = r.removeFromTop(30);
+    folder_.setBounds(last.removeFromRight(122).withSizeKeepingCentre(122, 30));
+    infoArea_ = last.withTrimmedRight(10);
 }
 
 void CaptureEditor::paint(juce::Graphics& g) {
@@ -118,12 +126,15 @@ void CaptureEditor::paint(juce::Graphics& g) {
     // time: 00:04.2 / 60 s
     const double s = proc_.isRecording() ? proc_.recordedSeconds() : 0.0;
     auto t = timeArea_;
-    g.setColour(proc_.isRecording() ? kInk : kMuted);
-    g.setFont(mono(28.0f));
-    g.drawText(juce::String::formatted("%02d:%04.1f", (int) s / 60, std::fmod(s, 60.0)), t.removeFromTop(32), juce::Justification::centredLeft);
+    const bool waiting = proc_.isWaiting();
+    g.setColour(proc_.isRecording() ? kInk : waiting ? kAccent : kMuted);
+    g.setFont(waiting ? silk(20.0f) : mono(28.0f));
+    g.drawText(waiting ? juce::String("WAITING") : juce::String::formatted("%02d:%04.1f", (int) s / 60, std::fmod(s, 60.0)), t.removeFromTop(32), juce::Justification::centredLeft);
     g.setColour(kMuted);
     g.setFont(mono(10.0f));
-    g.drawText(proc_.isRecording() ? juce::String("of 60 s max") : juce::String("ready"), t, juce::Justification::topLeft);
+    g.drawText(proc_.isRecording() ? juce::String("of 60 s max")
+               : waiting ? "for a signal above " + juce::String(juce::roundToInt(proc_.thresholdDb())) + " dB"
+                         : juce::String("ready"), t, juce::Justification::topLeft);
 
     // stereo meter, -48..0 dB
     for (int c = 0; c < 2; ++c) {
@@ -136,6 +147,22 @@ void CaptureEditor::paint(juce::Graphics& g) {
         g.setColour(kSeam);
         g.drawRoundedRectangle(bar, 2.0f, 1.0f);
     }
+    if (proc_.waitForSignal()) {   // the threshold on the meter
+        const float x = meterArea_.getX() + meterArea_.getWidth() * juce::jlimit(0.0f, 1.0f, (proc_.thresholdDb() + 48.0f) / 48.0f);
+        g.setColour(kAccent);
+        g.fillRect(juce::Rectangle<float>(x - 1.0f, (float) meterArea_.getY() - 4.0f, 2.0f, 27.0f));
+    }
+
+    // threshold readout: drag up/down or use the wheel
+    auto th = thresholdArea_.toFloat().withSizeKeepingCentre((float) thresholdArea_.getWidth(), 30.0f);
+    const bool on = proc_.waitForSignal();
+    g.setColour(kDisplay);
+    g.fillRoundedRectangle(th, 4.0f);
+    g.setColour(on ? kInk : kSeam);
+    g.drawRoundedRectangle(th, 4.0f, 1.5f);
+    g.setFont(mono(13.0f));
+    g.setColour(on ? kInk : kMuted);
+    g.drawText(juce::String(juce::roundToInt(proc_.thresholdDb())) + " dB", th, juce::Justification::centred);
 
     g.setColour(kMuted);
     g.setFont(mono(10.0f));
@@ -143,10 +170,25 @@ void CaptureEditor::paint(juce::Graphics& g) {
     g.drawText(last.isNotEmpty() ? "Saved  " + last : "Captures go to Documents/Fourierizer/Captures", infoArea_, juce::Justification::topLeft, true);
 }
 
+void CaptureEditor::mouseDown(const juce::MouseEvent& e) {
+    if (thresholdArea_.contains(e.getPosition())) dragFrom_ = proc_.thresholdDb();
+}
+void CaptureEditor::mouseDrag(const juce::MouseEvent& e) {
+    if (!thresholdArea_.contains(e.getMouseDownPosition())) return;
+    proc_.setThresholdDb((float) juce::roundToInt(dragFrom_ - e.getDistanceFromDragStartY() * 0.25f));
+    repaint();
+}
+void CaptureEditor::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& w) {
+    if (!thresholdArea_.contains(e.getPosition())) return;
+    proc_.setThresholdDb(proc_.thresholdDb() + (w.deltaY > 0 ? 1.0f : -1.0f));
+    repaint();
+}
+
 void CaptureEditor::timerCallback() {
     for (int c = 0; c < 2; ++c) level_[c] = std::max(proc_.takePeak(c), level_[c] * 0.82f);   // fast attack, ~150 ms fall
-    rec_.lit = proc_.isRecording();
-    rec_.text = proc_.isRecording() ? "STOP" : "REC";
+    rec_.lit = proc_.isRecording() || proc_.isWaiting();
+    rec_.text = proc_.isRecording() ? "STOP" : proc_.isWaiting() ? "CANCEL" : "REC";
+    if (signal_.getToggleState() != proc_.waitForSignal()) signal_.setToggleState(proc_.waitForSignal(), juce::dontSendNotification);
     if (follow_.getToggleState() != proc_.followTransport()) follow_.setToggleState(proc_.followTransport(), juce::dontSendNotification);
     rec_.repaint();
     repaint(timeArea_.getUnion(meterArea_).expanded(4));

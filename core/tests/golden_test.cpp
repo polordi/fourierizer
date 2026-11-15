@@ -253,6 +253,32 @@ void testProperties() {
     check(up.size() == x.size() / 2, "+12 st halves the length");
 }
 
+void testMultires() {
+    std::puts("multiresolution (three bands, three grids)");
+    const json g = load("multires.json");
+    double dw = 0;
+    for (size_t i = 0; i < g["weights"]["freqs"].size(); ++i) {
+        const auto w = bandWeights(g["weights"]["freqs"][i].get<double>());
+        for (int b = 0; b < 3; ++b) dw = std::max(dw, std::abs(w[(size_t) b] - g["weights"]["w"][(size_t) b][i].get<double>()));
+    }
+    check(dw < 1e-12, fmt("crossover weights: max diff %.1e", dw));
+    const Channels x = channelsOf(g["x"]);
+    for (auto& c : g["cases"]) {
+        LayerInput in{x, gridOf(c["grid"]), shapesOf(g["shapes"])};
+        in.multires = true;
+        bool grids = true;
+        const double factors[3] = {4.0, 1.0, 0.25};
+        for (int b = 0; b < 3; ++b) {
+            const Grid bg = bandGrid(in.grid, factors[b]);
+            grids = grids && bg.L == c["bands"][(size_t) b]["L"].get<int>() && bg.N == c["bands"][(size_t) b]["N"].get<int>() && bg.H == c["bands"][(size_t) b]["H"].get<int>();
+        }
+        const Channels y = synthesizeLayer(in, g["sr"].get<double>());
+        double d = 0;
+        for (size_t ch = 0; ch < y.size(); ++ch) d = std::max(d, maxAbsDiff(y[ch], c["y"][ch]));
+        check(grids && d < 1e-9, c["grid"]["window"].get<std::string>() + fmt(": max diff %.2e", d));
+    }
+}
+
 void testSpectral() {
     std::puts("spectral pitch shift");
     const json g = load("spectral.json");
@@ -291,6 +317,7 @@ int main() {
         testResample();
         testOps();
         testSpectral();
+        testMultires();
         testSpectrogram();
         testProperties();
     } catch (const std::exception& e) {

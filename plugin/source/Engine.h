@@ -50,7 +50,8 @@ public:
     void clearResult();
 
     // ---- jobs (results through `done`)
-    void spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done);
+    /// range: {t0, t1, cols} for a zoomed view (only that span, one frame per column), or void.
+    void spectrogram(int layer, double pitch, const fz::Grid& grid, const fz::Axis& axis, Done done, const juce::var& range = {}, bool multires = false);
     void render(const juce::var& request, Done done);       // supersedes (cancels) the previous one
     void resultImage(const fz::Axis& axis, Done done);       // the current result on another axis
     /// The analysis view: {axis, t0, t1, n, cols, rows} → {image: {key, cols, rows, peakDbfs}, wave: key, t0, t1}.

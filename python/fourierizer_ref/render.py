@@ -7,6 +7,16 @@ are summed in the time domain. Because the ISTFT is linear, no coefficient matri
 resampled or aligned (the v1 thesis notebook did that, which averaged complex coefficients of
 different phases). Pitch (T_i) is applied before analysis, so the selection is drawn on what
 you actually hear; the offset τ_i is a pure delay applied after synthesis.
+
+Multiresolution (PLAN.md §3.4). A layer can be resynthesized on three grids instead of one: the
+lows on a window 4× longer than the layer's (frequency detail), the mids on the layer's own and
+the highs on one 4× shorter (time detail). Each band b is the same masked resynthesis on its grid
+with the selection multiplied by a frequency weight w_b(f):
+
+    y = Σ_b ISTFT_b( (M · w_b) ⊙ STFT_b(x) ),    w_low + w_mid + w_high = 1,
+
+where the weights cross over with a raised cosine in log f, one octave wide, centred on
+MULTIRES_SPLITS. Without a selection limit (M = 1) the bands add back up to x.
 """
 
 from __future__ import annotations
@@ -16,8 +26,33 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .audio import tape_pitch
-from .mask import Selection
+from .mask import F_FLOOR, Selection
 from .stft import Grid, bin_freqs, frame_times, istft, stft
+
+MULTIRES_SPLITS = (300.0, 3000.0)   # Hz: low | mid | high
+MULTIRES_WIDTH = 1.0                # octaves of each crossover
+MULTIRES_FACTORS = (4.0, 1.0, 0.25) # window size of each band relative to the layer's
+MULTIRES_MIN_N, MULTIRES_MAX_N = 128, 32768
+
+
+def band_weights(freqs: np.ndarray) -> list[np.ndarray]:
+    """w_low, w_mid, w_high at each frequency (they sum to 1)."""
+    P = np.log2(np.maximum(freqs, F_FLOOR))
+
+    def rise(fc: float) -> np.ndarray:
+        u = np.clip((P - np.log2(fc)) / MULTIRES_WIDTH + 0.5, 0.0, 1.0)
+        return 0.5 - 0.5 * np.cos(np.pi * u)
+
+    r1, r2 = rise(MULTIRES_SPLITS[0]), rise(MULTIRES_SPLITS[1])
+    return [1.0 - r1, r1 - r2, r2]
+
+
+def band_grid(grid: Grid, factor: float) -> Grid:
+    """The layer's grid scaled by `factor` (same window, zero-padding ratio and overlap)."""
+    rnd = lambda v: int(np.floor(v + 0.5))   # the same rounding as the TS and C++ engines
+    N = int(min(MULTIRES_MAX_N, max(MULTIRES_MIN_N, rnd(grid.n_fft * factor))))
+    scale = N / grid.n_fft
+    return Grid(grid.window, max(2, rnd(grid.L * scale)), N, max(1, rnd(grid.H * scale)), dict(grid.params))
 
 
 @dataclass
@@ -28,13 +63,27 @@ class Layer:
     gain_db: float = 0.0
     offset_s: float = 0.0             # positive = later, negative = earlier (trims the start)
     pitch_st: float = 0.0             # Tape transposition in semitones
+    multires: bool = False            # three bands on three grids (see the module docstring)
 
     def synthesize(self, sr: int) -> tuple[np.ndarray, np.ndarray]:
-        """Return (masked resynthesis (ch, n), mask (frames, bins)) before gain and offset."""
+        """Return (masked resynthesis (ch, n), mask (frames, bins)) before gain and offset.
+        With multires, the mask returned is the mid band's (on the layer's own grid)."""
         x = tape_pitch(np.atleast_2d(self.audio), self.pitch_st)
-        X = stft(x, self.grid)
-        M = self.selection.rasterize(frame_times(X.shape[-2], self.grid, sr), bin_freqs(self.grid, sr))
-        return istft(X * M, self.grid, x.shape[-1]), M
+        if not self.multires:
+            X = stft(x, self.grid)
+            M = self.selection.rasterize(frame_times(X.shape[-2], self.grid, sr), bin_freqs(self.grid, sr))
+            return istft(X * M, self.grid, x.shape[-1]), M
+        y = np.zeros(x.shape)
+        M_mid = None
+        for factor, w_fn in zip(MULTIRES_FACTORS, range(3)):
+            g = band_grid(self.grid, factor)
+            X = stft(x, g)
+            freqs = bin_freqs(g, sr)
+            M = self.selection.rasterize(frame_times(X.shape[-2], g, sr), freqs) * band_weights(freqs)[w_fn][None, :]
+            y = y + istft(X * M, g, x.shape[-1])
+            if factor == 1.0:
+                M_mid = M
+        return y, M_mid
 
 
 def _place(y: np.ndarray, offset: int) -> tuple[np.ndarray, int]:

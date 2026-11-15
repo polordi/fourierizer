@@ -44,7 +44,8 @@ export interface Host {
   /** Recent captures from Fourierizer Capture, newest first (null: not available here). */
   captures(): Promise<CaptureInfo[]> | null;
   loadCapture(i: number, path: string): Promise<SourceInfo>;
-  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis): Promise<SpectrogramImage>;
+  /** A layer's spectrogram: the whole sound, or only [t0, t1] at `cols` columns (a zoomed view). */
+  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis, range?: { t0: number; t1: number; cols: number }, multires?: boolean): Promise<SpectrogramImage>;
   render(job: RenderJob): Promise<ResultInfo>;
   /** The current result's display image on another axis (null without a result). */
   resultImage(axis: Axis): Promise<SpectrogramImage | null>;
@@ -157,8 +158,8 @@ export class BrowserHost implements Host {
     this.worker.postMessage({ type: "clear", id: i } satisfies WorkerRequest);
   }
 
-  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis): Promise<SpectrogramImage> {
-    return this.call({ type: "spectrogram", req: this.next++, id: i, pitch, grid, sr, axis });
+  spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis, range?: { t0: number; t1: number; cols: number }, multires = false): Promise<SpectrogramImage> {
+    return this.call({ type: "spectrogram", req: this.next++, id: i, pitch, grid, sr, axis, range, multires });
   }
 
   async resultImage(axis: Axis): Promise<SpectrogramImage | null> {

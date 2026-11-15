@@ -29,6 +29,11 @@ struct SpectrogramImage {
 SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int maxCols = 1400, int rows = 360, Axis axis = {},
                                   long long start = 0, long long end = -1);
 
+/// A multiresolution layer's display: each row from the grid of the band that dominates its
+/// frequency (ui/src/dsp/multires-image.ts). `hopFor` may shorten each band's hop (zoomed views).
+SpectrogramImage multiresImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows, Axis axis,
+                               long long start = 0, long long end = -1, int maxHop = 0);
+
 /// Min and max of x[start, end) in `cols` equal columns: {min0, max0, min1, max1, …}.
 std::vector<float> waveformPeaks(const Signal& x, long long start, long long end, int cols);
 

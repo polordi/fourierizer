@@ -1,8 +1,11 @@
 // Fourierizer Capture: passes audio through untouched and, while recording, writes it to a WAV
 // file (24-bit, the host's rate) in Documents/Fourierizer/Captures.
 //
-// Two ways to record:
+// Ways to record:
 //   Rec                  starts and stops by hand.
+//   Start on signal      Rec waits until the input goes above a threshold (default −45 dBFS), so
+//                        you can press it and then turn to your instrument. The 50 ms before the
+//                        trigger are kept (a pre-roll), so the attack is not cut.
 //   Record while playing starts exactly when the host's transport starts and stops when it stops.
 //                        A file is prepared ("armed") in advance, so the first sample is kept.
 //
@@ -50,6 +53,11 @@ public:
     // ---- message thread (the editor)
     void toggleRecord();
     void setFollowTransport(bool on);
+    void setWaitForSignal(bool on) { waitSignal_ = on; }
+    bool waitForSignal() const { return waitSignal_.load(); }
+    void setThresholdDb(float db) { thresholdDb_ = juce::jlimit(-72.0f, -6.0f, db); }
+    float thresholdDb() const { return thresholdDb_.load(); }
+    bool isWaiting() const { return waiting_.load(); }
     bool followTransport() const { return follow_.load(); }
     bool isRecording() const { return recording_.load(); }
     double recordedSeconds() const { return (double) recorded_.load() / std::max(1.0, sampleRate_.load()); }
@@ -73,10 +81,14 @@ private:
 
     juce::TimeSliceThread writerThread_{"Fourierizer Capture writer"};
     juce::SpinLock lock_;                        // guards the three slots below
-    std::unique_ptr<Recorder> armed_, active_;
+    std::unique_ptr<Recorder> armed_, active_, waitingRec_;
     std::array<std::unique_ptr<Recorder>, 4> done_;
 
     std::atomic<bool> follow_{false}, recording_{false}, byTransport_{false}, holdUntilStop_{false}, wasPlaying_{false};
+    std::atomic<bool> waitSignal_{false}, waiting_{false};
+    std::atomic<float> thresholdDb_{-45.0f};
+    juce::AudioBuffer<float> preroll_;           // the last 50 ms while waiting (audio thread only)
+    int prerollPos_ = 0, prerollFill_ = 0;
     std::atomic<juce::int64> recorded_{0};
     std::atomic<double> sampleRate_{48000.0};
     std::array<std::atomic<float>, 2> peak_{};

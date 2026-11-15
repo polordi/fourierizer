@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "fourierizer/fft.h"
+#include "fourierizer/render.h"
 
 namespace fz {
 
@@ -63,6 +64,34 @@ SpectrogramImage spectrogramImage(const Signal& x, double sr, const Grid& g, int
         }
     }
     return img;
+}
+
+SpectrogramImage multiresImage(const Signal& x, double sr, const Grid& g, int maxCols, int rows, Axis axis,
+                               long long start, long long end, int maxHop) {
+    std::array<SpectrogramImage, 3> imgs;
+    for (int b = 0; b < 3; ++b) {
+        Grid bg = bandGrid(g, kMultiresFactors[b]);
+        if (maxHop > 0) bg.H = std::max(16, std::min(bg.H, maxHop));
+        imgs[(size_t) b] = spectrogramImage(x, sr, bg, maxCols, rows, axis, start, end);
+    }
+    int cols = 0;
+    double ref = -1000;
+    for (const auto& m : imgs) { cols = std::max(cols, m.cols); ref = std::max(ref, m.peakDbfs); }
+    const double fmin = axis.fmin, fmax = std::min(axis.fmax, sr / 2);
+    SpectrogramImage out{std::vector<uint8_t>(static_cast<size_t>(rows) * cols, 255), cols, rows, ref};
+    for (int r = 0; r < rows; ++r) {
+        const double y = (r + 0.5) / rows;
+        const double f = axis.log ? fmin * std::pow(fmax / fmin, 1 - y) : fmin + (fmax - fmin) * (1 - y);
+        const auto w = bandWeights(std::max(0.0, f));
+        const int b = w[0] >= w[1] && w[0] >= w[2] ? 0 : w[1] >= w[2] ? 1 : 2;
+        const auto& m = imgs[(size_t) b];
+        for (int c = 0; c < cols; ++c) {
+            const int v = m.data[static_cast<size_t>(r) * m.cols + std::min(m.cols - 1, static_cast<int>(static_cast<long long>(c) * m.cols / cols))];
+            if (v >= 255) continue;
+            out.data[static_cast<size_t>(r) * cols + c] = static_cast<uint8_t>(std::clamp<long>(std::lround(2 * (ref - (m.peakDbfs - v / 2.0))), 0, 255));
+        }
+    }
+    return out;
 }
 
 std::vector<float> waveformPeaks(const Signal& x, long long start, long long end, int cols) {

@@ -19,6 +19,7 @@ from fourierizer_ref.render import Layer, render                   # noqa: E402
 from fourierizer_ref.audio import resample_by_step                 # noqa: E402
 from fourierizer_ref.ops import OpLayer, render_op                 # noqa: E402
 from fourierizer_ref.spectral import spectral_pitch                # noqa: E402
+from fourierizer_ref.render import band_grid, band_weights         # noqa: E402
 
 OUT = Path(__file__).resolve().parent / "data"
 SR = 8000
@@ -145,6 +146,17 @@ def main() -> None:
         {"semitones": st, "n": nfft, "channels": ch, "y": [arr(c) for c in spectral_pitch(xs[:ch], st, nfft)]}
         for st, nfft, ch in [(7, 256, 2), (-5, 512, 1), (12, 256, 2), (3.5, 128, 1), (-19, 256, 2)]]}
     (OUT / "spectral.json").write_text(json.dumps(spectral_doc))
+
+    # Multiresolution: the same layer on three grids with crossover weights (SR 8000 keeps it small).
+    mr_cases = []
+    for g in (Grid("hann", 256, 256, 64), Grid("blackman_harris", 512, 512, 128)):
+        y, _ = Layer(stereo, g, sel, multires=True).synthesize(SR)
+        mr_cases.append({"grid": grid_json(g), "y": [arr(c) for c in y],
+                         "bands": [grid_json(band_grid(g, f)) for f in (4.0, 1.0, 0.25)]})
+    wf = np.array([0.0, 100.0, 212.0, 300.0, 424.0, 1000.0, 2121.0, 3000.0, 4243.0])
+    multires_doc = {"sr": SR, "x": [arr(c) for c in stereo], "shapes": [shape_json(s) for s in sel.shapes],
+                    "cases": mr_cases, "weights": {"freqs": arr(wf), "w": [arr(w) for w in band_weights(wf)]}}
+    (OUT / "multires.json").write_text(json.dumps(multires_doc))
     print("golden files written to", OUT)
 
 

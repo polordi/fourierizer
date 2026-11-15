@@ -126,8 +126,8 @@ export class PluginHost implements Host {
   async captures(): Promise<CaptureInfo[]> { const r = await this.call<CaptureInfo[] | null>("captures"); return Array.isArray(r) ? r : []; }
   loadCapture(i: number, path: string): Promise<SourceInfo> { return this.checked<SourceInfo>("loadCapture", i, path); }
 
-  async spectrogram(i: number, pitch: number, grid: Grid, _sr: number, axis: Axis): Promise<SpectrogramImage> {
-    const r = await this.checked<ImageRef & { duration: number }>("spectrogram", i, pitch, grid, axis);
+  async spectrogram(i: number, pitch: number, grid: Grid, _sr: number, axis: Axis, range?: { t0: number; t1: number; cols: number }, multires = false): Promise<SpectrogramImage> {
+    const r = await this.checked<ImageRef & { duration: number }>("spectrogram", i, pitch, grid, axis, range ?? null, multires);
     return (await this.image(r))!;
   }
 

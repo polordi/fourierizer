@@ -6,6 +6,7 @@ import { tapePitch } from "./dsp/resample.ts";
 import { synthesizeLayer, mix, peakOf } from "./dsp/render.ts";
 import { renderOp, type Op } from "./dsp/ops.ts";
 import { analysisHop, spectrogramImage, waveformPeaks } from "./dsp/spectrogram.ts";
+import { multiresImage } from "./dsp/multires-image.ts";
 import { spectralPitch } from "./dsp/spectral.ts";
 import type { Shape } from "./dsp/mask.ts";
 import type { Grid } from "./dsp/stft.ts";
@@ -61,8 +62,14 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         break;
       }
       case "spectrogram": {
-        const x = mid(pitchedSource(msg.id, msg.pitch));
-        const img = spectrogramImage(x, msg.sr, msg.grid, 1400, 360, msg.axis);
+        const x = mid(pitchedSource(msg.id, msg.pitch)), q = msg.range;
+        // a zoomed view: only its span, with a hop small enough for one frame per column
+        // (a multiresolution band is displayed with the layer's own hop at most: same time sampling,
+        //  its own window, so the long window's smear shows without coarse columns)
+        const hop = (g: Grid) => Math.min(g.H, msg.grid.H, q ? Math.max(16, Math.floor((q.t1 - q.t0) * msg.sr / q.cols)) : Infinity);
+        const [cols, s0, s1] = q ? [q.cols, Math.round(q.t0 * msg.sr), Math.round(q.t1 * msg.sr)] : [1400, 0, -1];
+        const img = msg.multires ? multiresImage(x, msg.sr, msg.grid, cols, 360, msg.axis, s0, s1, hop)
+          : spectrogramImage(x, msg.sr, { ...msg.grid, H: hop(msg.grid) }, cols, 360, msg.axis, s0, s1);
         ctx.postMessage({ type: "spectrogram", req: msg.req, id: msg.id, ...img, duration: x.length / msg.sr }, [img.data.buffer]);
         break;
       }
@@ -72,7 +79,7 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
         let out: Float64Array[];
         if (msg.op === "sum") {
           out = mix(active.map((l) => ({
-            y: synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct }, msg.sr),
+            y: synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct, multires: l.multires }, msg.sr),
             gainDb: l.gainDb, offsetS: l.offsetS,
           })), msg.sr, 2, -0.3);
         } else {
@@ -109,7 +116,7 @@ ctx.onmessage = (e: MessageEvent<WorkerRequest>) => {
       }
       case "layer": {
         const l = msg.job;
-        const y = synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct }, msg.sr);
+        const y = synthesizeLayer({ channels: pitchedSource(l.id, l.pitch), grid: l.grid, shapes: l.shapes as Shape[], featherS: l.featherS, featherOct: l.featherOct, multires: l.multires }, msg.sr);
         const chans = y.map((c) => Float32Array.from(c));
         const src = pitchedSource(l.id, l.pitch), orig = src.map((c) => Float32Array.from(c));
         ctx.postMessage({ type: "layer", req: msg.req, channels: chans, peak: peakOf(y), original: orig, peakOriginal: peakOf(src) },

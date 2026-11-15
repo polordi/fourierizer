@@ -114,6 +114,10 @@ class App implements LayerHost {
     return true;
   }
   captures() { return this.host.captures(); }
+  viewChanged(i: number): void {
+    clearTimeout(this.specTimer[i]);
+    this.specTimer[i] = window.setTimeout(() => void this.requestSpectrogram(i), 120);
+  }
   loadCapture(i: number, c: { name: string; path: string }): void {
     this.toast(`Loading ${c.name}…`);
     this.host.loadCapture(i, c.path)
@@ -242,8 +246,9 @@ class App implements LayerHost {
     if (!l.loaded) return;
     const req = ++this.specReq[i];
     try {
-      const img = await this.host.spectrogram(i, l.pitch, gridOf(l), SR, getAxis());
-      if (req === this.specReq[i]) this.views[i].setSpectrogram(img);
+      const want = this.views[i].wantedImage();
+      const img = await this.host.spectrogram(i, l.pitch, gridOf(l), SR, getAxis(), want ?? undefined, !!l.multires);
+      if (req === this.specReq[i]) this.views[i].setSpectrogram(img, want ? [want.t0, want.t1] : undefined);
     } catch (e) { this.toast((e as Error).message); }
   }
 
@@ -273,7 +278,7 @@ class App implements LayerHost {
 
   private job(l: LayerState): LayerJob {
     const f = featherOf(l.feather);
-    return { id: l.index, pitch: l.pitch, grid: gridOf(l), shapes: l.shapes, featherS: f.s, featherOct: f.oct, gainDb: l.levelDb, offsetS: l.offset };
+    return { id: l.index, pitch: l.pitch, grid: gridOf(l), shapes: l.shapes, featherS: f.s, featherOct: f.oct, gainDb: l.levelDb, offsetS: l.offset, multires: !!l.multires };
   }
 
   async renderNow(): Promise<void> {

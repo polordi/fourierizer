@@ -228,3 +228,34 @@ def test_harmonic_mask_selects_the_comb_only():
     odd = Selection((Harmonic(t=(0, 1), f0=200, count=3, parity="odd", feather_s=0, feather_oct=0),))
     assert odd.rasterize(np.array([0.5]), np.array([200, 400, 600, 1000]))[0].tolist() == [1, 0, 1, 1]
     assert sel.rasterize(np.array([1.5]), np.array([200]))[0, 0] == 0   # outside in time
+
+
+# ---- Multiresolution ---------------------------------------------------------------------------
+from fourierizer_ref.render import band_grid, band_weights  # noqa: E402
+
+
+def test_band_weights_sum_to_one_and_cross_at_the_splits():
+    f = np.geomspace(20, 20000, 200)
+    w = band_weights(f)
+    assert np.allclose(w[0] + w[1] + w[2], 1.0)
+    assert np.all(np.array(w) >= -1e-12)
+    lo, mid, hi = band_weights(np.array([300.0, 3000.0]))
+    assert lo[0] == pytest.approx(0.5) and mid[0] == pytest.approx(0.5) and hi[1] == pytest.approx(0.5)
+
+
+def test_band_grids_keep_window_overlap_and_padding():
+    g = band_grid(Grid("hann", 2048, 4096, 512), 4.0)
+    assert (g.L, g.n_fft, g.H) == (8192, 16384, 2048)
+    g = band_grid(Grid("hann", 1024, 1024, 256), 0.25)
+    assert (g.L, g.n_fft, g.H) == (256, 256, 64)
+
+
+def test_multires_with_everything_selected_reproduces_the_input():
+    sr = 16000
+    rng = np.random.default_rng(5)
+    t = np.arange(sr) / sr
+    x = 0.3 * np.sin(2 * np.pi * 110 * t) + 0.2 * np.sin(2 * np.pi * 1500 * t) + 0.05 * rng.standard_normal(sr)
+    y, _ = Layer(x[None], Grid("hann", 1024, 1024, 256), Selection.everything(), multires=True).synthesize(sr)
+    err = np.max(np.abs(y[0] - x)[2048:-2048])
+    assert err < 0.02 * np.max(np.abs(x)), err
+

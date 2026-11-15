@@ -3,11 +3,29 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <numbers>
 #include <thread>
 
 #include "fourierizer/resample.h"
 
 namespace fz {
+
+std::array<double, 3> bandWeights(double f) {
+    const double P = std::log2(std::max(f, kFreqFloor));
+    auto rise = [&](double fc) {
+        const double u = std::clamp((P - std::log2(fc)) / kMultiresWidth + 0.5, 0.0, 1.0);
+        return 0.5 - 0.5 * std::cos(std::numbers::pi * u);
+    };
+    const double r1 = rise(kMultiresSplits[0]), r2 = rise(kMultiresSplits[1]);
+    return {1 - r1, r1 - r2, r2};
+}
+
+Grid bandGrid(const Grid& g, double factor) {
+    auto rnd = [](double v) { return static_cast<int>(std::floor(v + 0.5)); };
+    const int N = std::min(32768, std::max(128, rnd(g.N * factor)));
+    const double scale = static_cast<double>(N) / g.N;
+    return {g.window, std::max(2, rnd(g.L * scale)), N, std::max(1, rnd(g.H * scale))};
+}
 
 Channels synthesizeLayer(const LayerInput& layer, double sr, const std::atomic<bool>* cancel) {
     Channels pitched;
@@ -16,13 +34,32 @@ Channels synthesizeLayer(const LayerInput& layer, double sr, const std::atomic<b
         for (const Signal& c : layer.channels) pitched.push_back(tapePitch(c, layer.pitchSt));
         x = &pitched;
     }
-    SelectionRaster sel(layer.shapes, logFreqs(binFreqs(layer.grid, sr)), layer.featherS, layer.featherOct);
-    if (sel.empty()) {
+    if (layer.shapes.empty()) {
         Channels zero;
         for (const Signal& c : *x) zero.emplace_back(c.size(), 0.0);
         return zero;
     }
-    return maskedResynthesis(*x, layer.grid, sr, [&](int, double t, double* out) { sel.row(t, out); }, cancel);
+    if (!layer.multires) {
+        SelectionRaster sel(layer.shapes, logFreqs(binFreqs(layer.grid, sr)), layer.featherS, layer.featherOct);
+        return maskedResynthesis(*x, layer.grid, sr, [&](int, double t, double* out) { sel.row(t, out); }, cancel);
+    }
+    Channels y;
+    for (int b = 0; b < 3; ++b) {
+        const Grid g = bandGrid(layer.grid, kMultiresFactors[b]);
+        const auto freqs = binFreqs(g, sr);
+        std::vector<double> w(freqs.size());
+        for (size_t k = 0; k < freqs.size(); ++k) w[k] = bandWeights(freqs[k])[(size_t) b];
+        SelectionRaster sel(layer.shapes, logFreqs(freqs), layer.featherS, layer.featherOct);
+        Channels band = maskedResynthesis(*x, g, sr, [&](int, double t, double* out) {
+            sel.row(t, out);
+            for (size_t k = 0; k < w.size(); ++k) out[k] *= w[k];
+        }, cancel);
+        if (y.empty()) y = std::move(band);
+        else
+            for (size_t c = 0; c < y.size(); ++c)
+                for (size_t i = 0; i < y[c].size(); ++i) y[c][i] += band[c][i];
+    }
+    return y;
 }
 
 double peakOf(const Channels& x) {

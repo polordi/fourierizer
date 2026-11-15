@@ -29,6 +29,7 @@ export interface LayerState {
   mute: boolean;
   solo: boolean;
   shapes: Shape[];
+  multires: boolean;    // lows / mids / highs on three grids (PLAN §3.4)
 }
 
 /** How every spectrogram is drawn (the Display panel), like Wave Candy's spectrum settings. */
@@ -103,7 +104,7 @@ export function emptyLayer(index: number): LayerState { return layer(index, "", 
 function layer(index: number, name: string, shapes: Shape[], extra: Partial<LayerState> = {}): LayerState {
   return {
     index, name, loaded: false, samples: 0, channels: 1, window: "hann", N: 4096, hopDiv: 8,
-    offset: 0, pitch: 0, feather: 0.537, levelDb: 0, mute: false, solo: false, shapes, ...extra,
+    offset: 0, pitch: 0, feather: 0.537, levelDb: 0, mute: false, solo: false, multires: false, shapes, ...extra,
   };
 }
 

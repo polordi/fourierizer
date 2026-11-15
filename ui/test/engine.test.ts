@@ -151,3 +151,21 @@ test("magic wand traces the clicked area; snapRow finds the loudest row", async 
   assert.deepEqual(wandRegion(img, 25, 2, 20), []);                       // silence: nothing
   assert.ok(Math.abs(snapRow(img, 9.2, 3, 10, 19) - 7.5) < 0.5);
 });
+
+test("multiresolution (three bands, three grids) matches Layer.synthesize(multires=True)", async () => {
+  const { bandGrid, bandWeights } = await import("../src/dsp/render.ts");
+  const g = load("multires.json");
+  g.weights.freqs.forEach((f: number, i: number) => {
+    const w = bandWeights(f);
+    for (let b = 0; b < 3; b++) assert.ok(Math.abs(w[b] - g.weights.w[b][i]) < 1e-12, `weight ${b} at ${f} Hz`);
+  });
+  for (const c of g.cases) {
+    [4, 1, 0.25].forEach((f, b) => assert.deepEqual(bandGrid(c.grid as Grid, f), { ...c.bands[b], window: c.grid.window }));
+    const y = synthesizeLayer({ channels: g.x, grid: c.grid as Grid, shapes: g.shapes as Shape[], multires: true }, g.sr);
+    for (let ch = 0; ch < y.length; ch++) {
+      const d = maxAbsDiff(y[ch], c.y[ch]);
+      assert.ok(d < 1e-9, `${c.grid.window}: max diff ${d}`);
+    }
+  }
+});
+

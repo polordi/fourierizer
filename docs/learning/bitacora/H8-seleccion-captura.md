@@ -68,3 +68,31 @@ El sonido pasa por Capture sin cambios: puedes dejarlo puesto en la pista.
 3. Dale play a tu patrón y detenlo. En la ventana de Capture aparece "Saved …".
 4. En Fourierizer, botón ⤓ de una capa: tu captura está en la lista.
 5. Prueba **Harmonics** en una nota sostenida (y *Odd*), y **Wand** en un golpe o en una cola.
+
+## Ronda de feedback (2026-11-15): zoom, umbral de Capture y multirresolución
+
+**Zoom de tiempo en la capa ampliada**
+- *En simple:* en la vista expandida de una capa:
+  - la rueda del mouse acerca o aleja en el tiempo, alrededor del cursor;
+  - Shift + rueda (o el desplazamiento horizontal del trackpad) mueve la vista;
+  - **×N · Fit**, o doble clic en el eje de tiempo, regresa al sonido completo.
+
+  Las selecciones no se mueven: están en segundos reales. Puedes dibujar con precisión sobre un golpe ampliado.
+- *En técnico:* la capa tiene una ventana de tiempo visible y todas las conversiones tiempo ↔ x pasan por ella (dibujo, manijas, mover, varita, peine). Al hacer zoom pide un espectrograma solo de ese tramo, con tantas columnas como píxeles y un salto de un marco por columna (como mucho el de la capa). Mientras llega, la imagen anterior se reubica al instante. Fuera de la vista expandida siempre se ve el sonido completo.
+
+**Capture: START ON SIGNAL**
+- *En simple:* activas **START ON SIGNAL**, presionas REC y Capture espera ("WAITING") hasta que entra algo más fuerte que el umbral. Así puedes voltear hacia tu instrumento sin prisa. El umbral viene en **−45 dB** (bajito) y se ajusta arrastrando el recuadro hacia arriba o abajo, o con la rueda; se ve como una marca azul en el medidor. REC mientras espera se convierte en CANCEL.
+- *En técnico:* el hilo de audio compara el pico de cada bloque con el umbral y mientras espera guarda los últimos 50 ms en un búfer circular (reservado en `prepareToPlay`). Al cruzar el umbral escribe primero ese *pre-roll* y luego el bloque, para que no se corte el ataque. Probado: con ruido a −66 dB no arranca; con la nota sí, y el archivo dura la nota + 50 ms.
+
+**Multirresolución (PLAN §3.4): Resolution Single / Multi**
+
+Está en cada capa, debajo de *FFT size*.
+
+- *En simple:* una sola ventana obliga a escoger: larga, los graves se distinguen bien pero los golpes se embarran; corta, al revés. Con **Multi**, la capa se divide en tres bandas:
+  - los graves (debajo de ~300 Hz) usan una ventana 4× más larga;
+  - los medios usan la tuya;
+  - los agudos (arriba de ~3 kHz) usan una 4× más corta.
+
+  Resultado: bajos limpios y transientes agudos precisos en la misma selección. El espectrograma lo muestra: cada franja de frecuencias se ve con la ventana de su banda.
+- *En técnico:* cada banda es la misma resíntesis enmascarada en su propia malla (la de la capa escalada ×4, ×1 y ×¼, con la misma ventana, *zero-padding* y traslape), con la máscara multiplicada por un peso w_b(f). Los pesos cruzan con un coseno alzado en log f, una octava de ancho, y suman 1, así que con todo seleccionado las tres bandas reconstruyen la entrada (error < 2 % en la prueba). Aplica a **Sum**; Max, Cross y Product necesitan una malla común por definición. Python, TS y C++ coinciden (diferencia ~5e-16).
+- **Display:** cada renglón del espectrograma sale de la imagen de la banda que domina esa frecuencia, comparando en dBFS (que no depende del tamaño de ventana). La banda grave se dibuja con el salto de la capa, para que no salgan columnas gruesas.

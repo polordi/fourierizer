@@ -43,6 +43,8 @@ export interface LayerHost {
   setPicked(p: { layer: number; shape: number } | null): void;
   ensureAudio(): void;
   toast(message: string): void;
+  /** The visible time span of a layer changed (zoom): it needs a new spectrogram. */
+  viewChanged(i: number): void;
 }
 
 /** Frequency ticks for the current axis: decades on a log axis, round steps on a linear one;
@@ -218,7 +220,7 @@ export class LayerView {
       (id) => { L().window = id as WindowName; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); }, "win");
     const nStep = new Stepper({
       label: "FFT size N", display: () => String(L().N),
-      derived: () => `${(L().N / SR * 1000).toFixed(1)} ms · Δf ${(SR / L().N).toFixed(1)} Hz`,
+      derived: () => L().multires ? `lows ${Math.min(32768, L().N * 4)} · highs ${Math.max(128, L().N / 4)}` : `${(L().N / SR * 1000).toFixed(1)} ms · Δf ${(SR / L().N).toFixed(1)} Hz`,
       canStep: (d) => d > 0 ? L().N < 16384 : L().N > 256,
       step: (d) => { const l = L(); const nv = d > 0 ? Math.min(16384, l.N * 2) : Math.max(256, l.N / 2); if (nv !== l.N) { l.N = nv; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); } },
       dragPx: 24, tip: HELP.fftSize,
@@ -248,13 +250,19 @@ export class LayerView {
       label: "Fthr", aria: `Layer ${n} feather`, get: () => L().feather, reset: 0.537, format: featherLabel, tip: HELP.feather,
       set: (v) => { L().feather = v; host.paramsChanged(i, { render: true }); fthrMini.refresh(); },
     }, `fz-l${n}`);
-    const params = h("div", { class: "params" }, winSeg.el, nStep.el, hStep.el, ofsStep.el, pitchStep.el, h("span", { class: "grow" }), fthrKnob.el);
-    this.controls.push(fthrMini, winSeg, nStep, hStep, ofsStep, pitchStep, fthrKnob);
+    const resSeg = new Segmented("Resolution", [
+      { id: "single", label: "Single", title: HELP.resSingle },
+      { id: "multi", label: "Multi", title: HELP.resMulti },
+    ], () => (L().multires ? "multi" : "single"), (id) => { L().multires = id === "multi"; host.paramsChanged(i, { spectrogram: true, render: true }); this.refreshParams(); }, "res");
+    resSeg.el.dataset.tip = HELP.resolution;
+    const params = h("div", { class: "params" }, winSeg.el, h("div", { class: "fftcol" }, nStep.el, resSeg.el), hStep.el, ofsStep.el, pitchStep.el, h("span", { class: "grow" }), fthrKnob.el);
+    this.controls.push(fthrMini, winSeg, nStep, resSeg, hStep, ofsStep, pitchStep, fthrKnob);
 
     this.el = h("section", { class: `module lm fz-l${n} mode-grid`, "aria-label": `Layer ${n}` }, ...screws(), head, body, chips, params);
     this.wirePointer();
+    this.wireZoom();
     this.wireDrop();
-    new ResizeObserver(() => this.positionBar()).observe(this.display);
+    new ResizeObserver(() => { this.positionBar(); this.blit(); }).observe(this.display);
     this.refresh();
   }
 
@@ -270,13 +278,14 @@ export class LayerView {
       this.focusB.replaceChildren(icon(mode === "editor" ? ICONS.grid : ICONS.focus));
       const lbl = mode === "editor" ? "Back to the 2×2 grid" : `Focus layer ${n}`;
       this.focusB.setAttribute("aria-label", lbl); this.focusB.title = lbl;
-      this.drawShapes();
+      this.afterViewChange(true);
     }
   }
 
   // ---------------------------------------------------------------- refresh
   refresh(): void {
     const l = this.host.state(this.i);
+    if (this.zoom && (!l.loaded || this.zoom[1] > this.duration() + 1e-6)) this.zoom = null;
     this.nameEl.textContent = l.loaded ? l.name : "Empty slot";
     this.nameEl.title = l.name;
     this.metaEl.textContent = l.loaded ? `${(SR / 1000).toFixed(1)} kHz · ${pitchedSeconds(l).toFixed(2)} s · ${l.channels > 1 ? "stereo" : "mono"}` : "";
@@ -313,7 +322,7 @@ export class LayerView {
   refreshParams(): void {
     const l = this.host.state(this.i);
     this.chipEls.win.textContent = WINDOW_LABELS[l.window];
-    this.chipEls.n.textContent = String(l.N);
+    this.chipEls.n.textContent = l.multires ? `${l.N} ×3` : String(l.N);
     this.chipEls.h.textContent = String(l.N / l.hopDiv);
     this.chipEls.ofs.textContent = `${l.offset >= 0 ? "+" : "−"}${Math.abs(l.offset).toFixed(2)} s`;
     this.chipEls.pitch.textContent = `${l.pitch > 0 ? "+" : l.pitch < 0 ? "−" : ""}${Math.abs(l.pitch)} st`;
@@ -321,11 +330,15 @@ export class LayerView {
   }
 
   private drawAxis(): void {
-    const dur = this.duration();
-    const step = dur > 30 ? 10 : dur > 12 ? 5 : dur > 5 ? 2 : dur > 2 ? 1 : 0.5;
-    const spans: HTMLElement[] = [];
-    for (let t = 0; t < dur - step * 0.3; t += step) spans.push(h("span", { class: "ro-sm", style: `left:${(t / dur * 100).toFixed(2)}%` }, `${+t.toFixed(1)} s`));
-    this.xax.replaceChildren(...spans);
+    const [a, b] = this.span(), w = b - a;
+    const step = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10].find((s) => w / s <= 8) ?? 20;
+    const dec = step >= 1 ? 0 : step >= 0.1 ? 1 : 2, spans: HTMLElement[] = [];
+    for (let t = Math.ceil(a / step - 1e-9) * step; t < b - step * 0.3; t += step)
+      spans.push(h("span", { class: "ro-sm", style: `left:${((t - a) / w * 100).toFixed(2)}%` }, `${t.toFixed(dec)} s`));
+    const zoomed = this.isZoomed();
+    this.fitB.hidden = !zoomed;
+    if (zoomed) this.fitB.textContent = `×${(this.duration() / w).toFixed(w > this.duration() / 10 ? 1 : 0)} · Fit`;
+    this.xax.replaceChildren(...spans, this.fitB);
   }
 
   /** Play button state and the playhead over this layer's spectrogram (pos −1 hides it). */
@@ -335,19 +348,23 @@ export class LayerView {
     if (!on) this.setPlayhead(-1);
   }
   setPlayhead(pos: number): void {
-    this.playhead.style.display = pos < 0 ? "none" : "block";
-    if (pos >= 0) this.playhead.style.left = `${pos * 100}%`;
+    const u = pos < 0 ? -1 : this.uOf(pos * this.duration());
+    this.playhead.style.display = u < 0 || u > 1 ? "none" : "block";
+    if (u >= 0) this.playhead.style.left = `${u * 100}%`;
   }
 
-  setSpectrogram(img: { data: Uint8Array; cols: number; rows: number }): void {
+  /** A spectrogram of the time span [t0, t1] (the whole sound unless the view is zoomed). */
+  setSpectrogram(img: { data: Uint8Array; cols: number; rows: number }, span?: [number, number]): void {
     this.img = img;
-    paintSpectrogram(this.canvas, img, this.i + 1, this.host.look());
+    this.imgSpan = span ?? [0, this.duration()];
+    paintSpectrogram(this.painted, img, this.i + 1, this.host.look());
     this.hasImage = true;
+    this.blit();
   }
 
   /** Repaint with the current look (dB range and gain), without recomputing. */
   repaint(): void {
-    if (this.img && this.hasImage) paintSpectrogram(this.canvas, this.img, this.i + 1, this.host.look());
+    if (this.img && this.hasImage) { paintSpectrogram(this.painted, this.img, this.i + 1, this.host.look()); this.blit(); }
   }
 
   clearSpectrogram(): void {
@@ -357,7 +374,73 @@ export class LayerView {
     this.img = null;
   }
 
+  /** Draws the painted image where its time span falls in the view (instant on zoom, before the new image arrives). */
+  private blit(): void {
+    if (!this.hasImage) return;
+    const c = this.canvas, W = Math.max(1, Math.round((this.display.clientWidth || this.painted.width) * Math.min(2, devicePixelRatio || 1)));
+    const H = this.painted.height;
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    const g = c.getContext("2d")!;
+    g.clearRect(0, 0, W, H);
+    const x0 = this.uOf(this.imgSpan[0]) * W, x1 = this.uOf(this.imgSpan[1]) * W;
+    g.imageSmoothingEnabled = x1 - x0 > this.painted.width * 1.5;
+    g.drawImage(this.painted, x0, 0, x1 - x0, H);
+  }
+
   private duration(): number { const l = this.host.state(this.i); return l.loaded ? pitchedSeconds(l) : 4; }
+
+  // ---------------------------------------------------------------- time zoom (editor only)
+  private painted = document.createElement("canvas");
+  private imgSpan: [number, number] = [0, 4];
+  private zoom: [number, number] | null = null;
+  private fitB = h("button", { class: "zoomfit ro-sm", type: "button", hidden: true, title: "Back to the whole sound (or double-click the time axis)" });
+  private isZoomed(): boolean { return this.mode === "editor" && this.zoom !== null; }
+  /** The visible time span, in seconds. */
+  span(): [number, number] {
+    const d = this.duration();
+    if (!this.isZoomed()) return [0, d];
+    const [a, b] = this.zoom!;
+    return [Math.max(0, a), Math.min(d, b)];
+  }
+  private tOf(u: number): number { const [a, b] = this.span(); return a + u * (b - a); }
+  private uOf(t: number): number { const [a, b] = this.span(); return (t - a) / (b - a); }
+  /** The spectrogram this view needs: the whole sound, or the zoomed span at screen resolution. */
+  wantedImage(): { t0: number; t1: number; cols: number } | null {
+    if (!this.isZoomed()) return null;
+    const [t0, t1] = this.span();
+    return { t0, t1, cols: Math.max(200, Math.min(2400, Math.round(this.display.clientWidth * Math.min(2, devicePixelRatio || 1)))) };
+  }
+  private setZoom(a: number, b: number): void {
+    const d = this.duration(), w = Math.max(0.04, Math.min(d, b - a));
+    if (w >= d * 0.999) { this.zoom = null; }
+    else { a = Math.max(0, Math.min(d - w, a)); this.zoom = [a, a + w]; }
+    this.afterViewChange(false);
+  }
+  /** Everything that depends on the view, and a new image if the one shown covers another span. */
+  private afterViewChange(_modeChanged: boolean): void {
+    this.drawAxis();
+    this.drawShapes();
+    this.blit();
+    const want = this.wantedImage(), [a, b] = want ? [want.t0, want.t1] : [0, this.duration()];
+    const stale = Math.abs(this.imgSpan[0] - a) > 1e-6 || Math.abs(this.imgSpan[1] - b) > 1e-6;
+    if (this.host.state(this.i).loaded && this.hasImage && stale) this.host.viewChanged(this.i);
+  }
+  private wireZoom(): void {
+    this.svg.addEventListener("wheel", (e) => {
+      if (this.mode !== "editor" || !this.host.state(this.i).loaded) return;
+      e.preventDefault();
+      const [a, b] = this.span(), w = b - a, r = this.svg.getBoundingClientRect();
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {   // pan
+        const dx = (e.shiftKey ? e.deltaY : e.deltaX) / r.width * w;
+        this.setZoom(a + dx, b + dx);
+      } else {   // zoom around the pointer
+        const f = (e.clientX - r.left) / r.width, at = a + f * w, nw = w * Math.exp(e.deltaY * 0.0015);
+        this.setZoom(at - f * nw, at - f * nw + nw);
+      }
+    }, { passive: false });
+    this.fitB.addEventListener("click", () => this.setZoom(0, this.duration()));
+    this.xax.addEventListener("dblclick", () => this.setZoom(0, this.duration()));
+  }
 
   // ---------------------------------------------------------------- load menu: a file, or a recent capture
   private loadKey!: HTMLButtonElement;
@@ -387,7 +470,7 @@ export class LayerView {
   }
 
   // ---------------------------------------------------------------- shapes
-  private toX(t: number): number { return t / this.duration() * 1000; }
+  private toX(t: number): number { return this.uOf(t) * 1000; }
   private toY(f: number): number {
     const a = getAxis();
     return Math.min(1010, Math.max(-10, freqToY(a.scale === "log" ? Math.max(f, a.fmin * 0.5) : f) * 1000));
@@ -412,7 +495,7 @@ export class LayerView {
   private fadeCache = new Map<string, string>();
   /** Grayscale picture of the fade envelope E over the shape's box (white = full level), exactly as the engine applies it. */
   private fadeImage(sh: Shape, b: { x0: number; y0: number; x1: number; y1: number }): string {
-    const dur = this.duration(), k = `${JSON.stringify(sh)}|${dur}|${b.x0},${b.y0},${b.x1},${b.y1}`;
+    const [va, vb] = this.span(), k = `${JSON.stringify(sh)}|${va},${vb}|${b.x0},${b.y0},${b.x1},${b.y1}`;
     const hit = this.fadeCache.get(k);
     if (hit) return hit;
     const cols = 192, rows = sh.kind === "poly" ? 72 : 1;
@@ -422,7 +505,7 @@ export class LayerView {
       const y = b.y0 + (r + 0.5) / rows * (b.y1 - b.y0);
       const iv = rowIntervals(sh, Math.log2(Math.max(yToFreq(y / 1000), F_FLOOR)));
       for (let q = 0; q < cols; q++) {
-        const t = (b.x0 + (q + 0.5) / cols * (b.x1 - b.x0)) / 1000 * dur;
+        const t = this.tOf((b.x0 + (q + 0.5) / cols * (b.x1 - b.x0)) / 1000);
         const v = Math.round(255 * envelope(t, iv, sh.fadeIn ?? 0, sh.fadeOut ?? 0)), o = (r * cols + q) * 4;
         img.data[o] = img.data[o + 1] = img.data[o + 2] = v; img.data[o + 3] = 255;
       }
@@ -485,14 +568,14 @@ export class LayerView {
   /** Handles of the picked shape. A rectangle resizes freely from its 8 handles; a lasso scales
    *  proportionally from the 4 corners of its box, about the opposite corner. */
   private handleSpecs(sh: Shape): { x: number; y: number; cursor: string; round?: boolean; apply: (orig: Shape, p: [number, number]) => Shape }[] {
-    const b = this.box(sh), xm = (b.x0 + b.x1) / 2, ym = (b.y0 + b.y1) / 2, dur = this.duration();
+    const b = this.box(sh), xm = (b.x0 + b.x1) / 2, ym = (b.y0 + b.y1) / 2;
     if (sh.kind === "harm") {
       const yf = this.toY(harmonicNumbers(sh.f0, sh.count, sh.parity)[0] * sh.f0 || sh.f0);
       const end = (x: number, i: 0 | 1) => ({
         x, y: yf, cursor: "ew-resize",
         apply: (orig: Shape, p: [number, number]): Shape => {
           const r = JSON.parse(JSON.stringify(orig)) as HarmShape;
-          r.t[i] = p[0] * dur;
+          r.t[i] = this.tOf(p[0]);
           r.t.sort((a, c) => a - c);
           return r;
         },
@@ -504,7 +587,7 @@ export class LayerView {
         x, y, cursor,
         apply: (orig: Shape, p: [number, number]): Shape => {
           const r = JSON.parse(JSON.stringify(orig)) as RectShape;
-          if (tx !== null) r.t[tx] = p[0] * dur;
+          if (tx !== null) r.t[tx] = this.tOf(p[0]);
           if (fy !== null) r.f[fy] = yToFreq(p[1]);
           r.t.sort((a, c) => a - c); r.f.sort((a, c) => a - c);
           return r;
@@ -518,14 +601,14 @@ export class LayerView {
     const corner = (x: number, y: number, cursor: string, cx: 0 | 1, cy: 0 | 1) => ({
       x, y, cursor, round: true,
       apply: (orig: Shape, p: [number, number]): Shape => {
-        const o = orig as PolyShape, uv = o.points.map(([t, f]) => [t / dur, freqToY(Math.max(f, 1e-6))]);
+        const o = orig as PolyShape, uv = o.points.map(([t, f]) => [this.uOf(t), freqToY(Math.max(f, 1e-6))]);
         const us = uv.map((q) => q[0]), vs = uv.map((q) => q[1]);
         const U = [Math.min(...us), Math.max(...us)], V = [Math.min(...vs), Math.max(...vs)];
         const a = [U[1 - cx], V[1 - cy]], c = [U[cx], V[cy]];
         const W = this.display.clientWidth || 1, H = this.display.clientHeight || 1;
         const ex = (c[0] - a[0]) * W, ey = (c[1] - a[1]) * H, len = ex * ex + ey * ey;
         const k = len > 0 ? Math.min(20, Math.max(0.05, ((p[0] - a[0]) * W * ex + (p[1] - a[1]) * H * ey) / len)) : 1;
-        return { ...o, points: uv.map(([u, v]) => [(a[0] + k * (u - a[0])) * dur, yToFreq(a[1] + k * (v - a[1]))] as [number, number]) };
+        return { ...o, points: uv.map(([u, v]) => [this.tOf(a[0] + k * (u - a[0])), yToFreq(a[1] + k * (v - a[1]))] as [number, number]) };
       },
     });
     return [corner(b.x0, b.y0, "nwse-resize", 0, 0), corner(b.x1, b.y0, "nesw-resize", 1, 0), corner(b.x1, b.y1, "nwse-resize", 1, 1), corner(b.x0, b.y1, "nesw-resize", 0, 1)];
@@ -660,12 +743,15 @@ export class LayerView {
     this.bar.style.left = `${x}px`; this.bar.style.top = `${y}px`;
   }
 
-  /** The fundamental under a click at height v (0..1): the loudest row within a semitone, over the span [a, b] (fractions of the sound). */
+  /** Column of the current image at time t (its span may be a zoomed part of the sound). */
+  private colOf(t: number): number { const img = this.img!, [a, b] = this.imgSpan; return (t - a) / (b - a) * img.cols; }
+
+  /** The fundamental under a click at height v (0..1): the loudest row within a semitone, over the times [a, b]. */
   private snapF0(v: number, a: number, b: number): number {
     const f = yToFreq(v), img = this.img;
     if (!img || !this.hasImage) return f;
     const reach = Math.abs(freqToY(f * 2 ** (1 / 12)) - freqToY(f)) * img.rows;
-    const row = snapRow(img, v * img.rows, Math.max(1, reach), a * img.cols, b * img.cols);
+    const row = snapRow(img, v * img.rows, Math.max(1, reach), this.colOf(a), this.colOf(b));
     return yToFreq(row / img.rows);
   }
 
@@ -673,9 +759,9 @@ export class LayerView {
   wandPoints(t: number, f: number, tolDb: number): [number, number][] {
     const img = this.img;
     if (!img || !this.hasImage) return [];
-    const dur = this.duration();
-    return wandRegion(img, t / dur * img.cols, freqToY(f) * img.rows, tolDb)
-      .map(([x, y]) => [x / img.cols * dur, yToFreq(Math.min(1, Math.max(0, y / img.rows)))] as [number, number]);
+    const [a, b] = this.imgSpan;
+    return wandRegion(img, this.colOf(t), freqToY(f) * img.rows, tolDb)
+      .map(([x, y]) => [a + x / img.cols * (b - a), yToFreq(Math.min(1, Math.max(0, y / img.rows)))] as [number, number]);
   }
 
   private rel(e: PointerEvent): [number, number] {
@@ -684,7 +770,7 @@ export class LayerView {
   }
   private toTF(e: PointerEvent): [number, number] {
     const [u, v] = this.rel(e);
-    return [u * this.duration(), yToFreq(v)];
+    return [this.tOf(u), yToFreq(v)];
   }
 
   private inside(sh: Shape, u: number, v: number): boolean {
@@ -746,7 +832,7 @@ export class LayerView {
       dragged = true;
       if (act === "move") {
         if (!snapped) { snapped = true; this.host.editShapes(this.i, () => { }, { undo: true, render: false }); }
-        const du = p[0] - last[0], dv = p[1] - last[1], dt = du * this.duration();
+        const du = p[0] - last[0], dv = p[1] - last[1], dt = du * (this.span()[1] - this.span()[0]);
         const shift = (f: number) => (f <= 0 ? f : Math.max(1, yToFreq(freqToY(f) + dv)));  // follows the display axis
         last = p;
         this.host.editShapes(this.i, (shapes) => {
@@ -760,8 +846,8 @@ export class LayerView {
         const x = Math.min(start[0], p[0]) * 1000, y = Math.min(start[1], p[1]) * 1000;
         this.drawShapes(s("rect", { class: "preview", x, y, width: Math.abs(p[0] - start[0]) * 1000, height: Math.abs(p[1] - start[1]) * 1000 }));
       } else if (tool === "harm") {
-        const dur = this.duration(), f0 = yToFreq(start[1]);
-        const pv = this.combGeom({ t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f0, count: 16, width: 1 / 12, parity: "all" }, "preview");
+        const f0 = yToFreq(start[1]);
+        const pv = this.combGeom({ t: [this.tOf(Math.min(start[0], p[0])), this.tOf(Math.max(start[0], p[0]))], f0, count: 16, width: 1 / 12, parity: "all" }, "preview");
         this.drawShapes(pv);
       } else if (tool === "lasso") {
         const prev = lasso[lasso.length - 1];
@@ -780,10 +866,10 @@ export class LayerView {
         const mode = subtract ? "subtract" : "add";
         let sh: Shape | null = null;
         if (tool === "harm") {
-          const a = dragged ? Math.min(start[0], p[0]) : 0, b = dragged ? Math.max(start[0], p[0]) : 1;
-          sh = { kind: "harm", mode, t: [a * dur, b * dur], f0: this.snapF0(start[1], a, b), count: 16, width: 1 / 12, parity: "all" };
+          const a = dragged ? this.tOf(Math.min(start[0], p[0])) : 0, b = dragged ? this.tOf(Math.max(start[0], p[0])) : dur;
+          sh = { kind: "harm", mode, t: [a, b], f0: this.snapF0(start[1], a, b), count: 16, width: 1 / 12, parity: "all" };
         } else {
-          const t = start[0] * dur, f = yToFreq(start[1]), pts = this.wandPoints(t, f, 15);
+          const t = this.tOf(start[0]), f = yToFreq(start[1]), pts = this.wandPoints(t, f, 15);
           if (pts.length >= 3) sh = { kind: "poly", mode, points: pts, seed: { t, f, tol: 15 } };
           else this.host.toast("Nothing to select there: click on something you can see in the spectrogram");
         }
@@ -795,13 +881,13 @@ export class LayerView {
       } else if (act === "draw") {
         if (!dragged) this.host.setPicked(target >= 0 ? { layer: this.i, shape: target } : null);
         else if ((tool === "rect" || tool === "erase") && Math.abs(p[0] - start[0]) * r.width > 4 && Math.abs(p[1] - start[1]) * r.height > 4) {
-          const sh: Shape = { kind: "rect", mode: subtract ? "subtract" : "add", t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f: [yToFreq(Math.max(start[1], p[1])), yToFreq(Math.min(start[1], p[1]))] };
+          const sh: Shape = { kind: "rect", mode: subtract ? "subtract" : "add", t: [this.tOf(Math.min(start[0], p[0])), this.tOf(Math.max(start[0], p[0]))], f: [yToFreq(Math.max(start[1], p[1])), yToFreq(Math.min(start[1], p[1]))] };
           this.host.setPicked(null);
           this.host.editShapes(this.i, (shapes) => { shapes.push(sh); });
         } else if (tool === "lasso" && lasso.length >= 3) {
           const px = simplify(lasso.map(([u, v]) => [u * r.width, v * r.height] as [number, number]), 1.5);
           if (px.length >= 3) {
-            const sh: Shape = { kind: "poly", mode: subtract ? "subtract" : "add", points: px.map(([x, y]) => [x / r.width * dur, yToFreq(y / r.height)] as [number, number]) };
+            const sh: Shape = { kind: "poly", mode: subtract ? "subtract" : "add", points: px.map(([x, y]) => [this.tOf(x / r.width), yToFreq(y / r.height)] as [number, number]) };
             this.host.setPicked(null);
             this.host.editShapes(this.i, (shapes) => { shapes.push(sh); });
           }

@@ -3,6 +3,7 @@
 // Each layer is reconstructed on its own grid; no coefficient matrix is ever resampled.
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <optional>
 #include <vector>
@@ -21,7 +22,19 @@ struct LayerInput {
     double gainDb = 0.0;
     double offsetS = 0.0;       // positive = later; negative trims the start
     double pitchSt = 0.0;       // Tape transposition, applied before the STFT
+    bool multires = false;      // lows / mids / highs on three grids (render.py: Layer.multires)
 };
+
+// ---- Multiresolution (python/fourierizer_ref/render.py): the selection times a crossover weight
+// per band, each band resynthesized on the layer's grid scaled by 4, 1 and 1/4.
+inline constexpr double kMultiresSplits[2] = {300.0, 3000.0};
+inline constexpr double kMultiresWidth = 1.0;                 // octaves per crossover
+inline constexpr double kMultiresFactors[3] = {4.0, 1.0, 0.25};
+
+/// w_low, w_mid, w_high at frequency f (they sum to 1).
+std::array<double, 3> bandWeights(double f);
+/// The layer's grid scaled by `factor` (same window, zero-padding ratio and overlap).
+Grid bandGrid(const Grid& g, double factor);
 
 /// Masked resynthesis of one layer, before gain and offset.
 Channels synthesizeLayer(const LayerInput& layer, double sr, const std::atomic<bool>* cancel = nullptr);

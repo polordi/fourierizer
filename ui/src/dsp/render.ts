@@ -3,7 +3,7 @@
 // Each layer is reconstructed on its own grid; no matrix is ever resampled.
 
 import { binFreqs, maskedResynthesis, type Grid } from "./stft.ts";
-import { logFreqs, SelectionRaster, type Shape } from "./mask.ts";
+import { F_FLOOR, logFreqs, SelectionRaster, type Shape } from "./mask.ts";
 import { tapePitch } from "./resample.ts";
 
 export interface LayerInput {
@@ -15,6 +15,28 @@ export interface LayerInput {
   gainDb?: number;
   offsetS?: number;
   pitchSt?: number;                // Tape transposition, applied before the STFT
+  multires?: boolean;              // lows / mids / highs on three grids (Python: Layer.multires)
+}
+
+// ---- Multiresolution (Python: render.py band_weights / band_grid)
+export const MULTIRES_SPLITS = [300, 3000];
+export const MULTIRES_WIDTH = 1;
+export const MULTIRES_FACTORS = [4, 1, 0.25];
+const MIN_N = 128, MAX_N = 32768;
+
+/** w_low, w_mid, w_high at frequency f (they sum to 1). */
+export function bandWeights(f: number): [number, number, number] {
+  const P = Math.log2(Math.max(f, F_FLOOR));
+  const rise = (fc: number) => { const u = Math.min(1, Math.max(0, (P - Math.log2(fc)) / MULTIRES_WIDTH + 0.5)); return 0.5 - 0.5 * Math.cos(Math.PI * u); };
+  const r1 = rise(MULTIRES_SPLITS[0]), r2 = rise(MULTIRES_SPLITS[1]);
+  return [1 - r1, r1 - r2, r2];
+}
+
+/** The layer's grid scaled by `factor` (same window, zero-padding ratio and overlap). */
+export function bandGrid(g: Grid, factor: number): Grid {
+  const rnd = (v: number) => Math.floor(v + 0.5);
+  const N = Math.min(MAX_N, Math.max(MIN_N, rnd(g.N * factor))), scale = N / g.N;
+  return { window: g.window, L: Math.max(2, rnd(g.L * scale)), N, H: Math.max(1, rnd(g.H * scale)) };
 }
 
 /** Masked resynthesis of one layer, before gain and offset (Python: Layer.synthesize). */
@@ -22,8 +44,19 @@ export function synthesizeLayer(layer: LayerInput, sr: number): Float64Array[] {
   const x = layer.pitchSt ? layer.channels.map((c) => tapePitch(c, layer.pitchSt!)) : layer.channels;
   const sel = new SelectionRaster(layer.shapes, layer.featherS, layer.featherOct);
   if (sel.empty) return x.map((c) => new Float64Array(c.length));
-  const P = logFreqs(binFreqs(layer.grid, sr));
-  return maskedResynthesis(x, layer.grid, sr, (_m, t, out) => sel.row(t, P, out));
+  if (!layer.multires) {
+    const P = logFreqs(binFreqs(layer.grid, sr));
+    return maskedResynthesis(x, layer.grid, sr, (_m, t, out) => sel.row(t, P, out));
+  }
+  let y: Float64Array[] | null = null;
+  MULTIRES_FACTORS.forEach((factor, b) => {
+    const g = bandGrid(layer.grid, factor), freqs = binFreqs(g, sr), P = logFreqs(freqs);
+    const w = Float64Array.from(freqs, (f) => bandWeights(f)[b]);
+    const band = maskedResynthesis(x, g, sr, (_m, t, out) => { sel.row(t, P, out); for (let k = 0; k < out.length; k++) out[k] *= w[k]; });
+    if (!y) y = band;
+    else for (let c = 0; c < y.length; c++) for (let i = 0; i < y[c].length; i++) y[c][i] += band[c][i];
+  });
+  return y!;
 }
 
 export interface Part { y: Float64Array[]; gainDb?: number; offsetS?: number; }
