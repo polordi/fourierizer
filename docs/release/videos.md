@@ -1,4 +1,18 @@
-# Videos de lanzamiento: guion (borrador 2)
+# Videos de lanzamiento: guion (borrador 3)
+
+**Decisiones del autor (2026-11-15, borrador 3):**
+
+- **Frases:** el trailer usa las tres, en este orden:
+  - la **2** como apertura: qué hace;
+  - la **1** a la mitad, después de las primeras transformaciones: la promesa;
+  - la **3** antes del cierre: qué es.
+
+  La story usa la **1** como gancho y la **3** al final.
+- **Fuentes:** samples de uso libre de la biblioteca del autor (Cymatics, Dreamscapes, Ethereal Soundscapes). Nunca se suben al repositorio.
+- **Sin pieza final.** El cierre es una frase tocada con uno o dos de los sonidos resultantes (teclado de la app y cabezal en pantalla).
+- **El enlace** se agrega después.
+- **Primer paso:** renderizar las transformaciones como audio, para que el autor escuche y elija, antes de grabar pantalla. Están en `D:\Samples Polo\Fourierizer\Video previews` (fuentes `*-src-*` y resultados).
+
 
 **Cambios respecto al borrador 1** (notas del autor, 2026-11-15):
 
