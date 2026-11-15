@@ -14,7 +14,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fourierizer_ref.windows import WINDOWS, make_window          # noqa: E402
 from fourierizer_ref.stft import Grid                              # noqa: E402
-from fourierizer_ref.mask import Rect, Polygon, Selection          # noqa: E402
+from fourierizer_ref.mask import Harmonic, Rect, Polygon, Selection  # noqa: E402
 from fourierizer_ref.render import Layer, render                   # noqa: E402
 from fourierizer_ref.audio import resample_by_step                 # noqa: E402
 from fourierizer_ref.ops import OpLayer, render_op                 # noqa: E402
@@ -33,6 +33,8 @@ def shape_json(s) -> dict:
             "fadeIn": s.fade_in, "fadeOut": s.fade_out}
     if isinstance(s, Rect):
         return {"kind": "rect", "t": list(s.t), "f": list(s.f), **base}
+    if isinstance(s, Harmonic):
+        return {"kind": "harm", "t": list(s.t), "f0": s.f0, "count": s.count, "width": s.width, "parity": s.parity, **base}
     return {"kind": "poly", "points": [list(p) for p in s.points], **base}
 
 
@@ -95,6 +97,11 @@ def main() -> None:
                 feather_s=0.02, feather_oct=1 / 8, fade_in=0.0, fade_out=0.4),
         Rect(t=(0.6, 0.9), f=(500, 1500), mode="subtract", gain=0.9, feather_s=0.005, feather_oct=1 / 24,
              fade_in=0.1, fade_out=0.1),
+        Harmonic(t=(0.2, 1.4), f0=110.0, count=12, width=1 / 8, parity="all", feather_s=0.02, feather_oct=1 / 24,
+                 fade_in=0.05, fade_out=0.3),
+        Harmonic(t=(0.9, 1.7), f0=196.0, count=5, width=1 / 12, parity="odd", mode="subtract", gain=0.7,
+                 feather_s=0.01, feather_oct=1 / 36),
+        Harmonic(t=(0.0, 0.5), f0=330.0, count=3, width=1 / 6, parity="even", feather_s=0.0, feather_oct=0.0),
     ))
     times = np.linspace(-0.1, 1.8, 77)
     freqs = np.concatenate([[0.0], np.geomspace(40, 6000, 90)])

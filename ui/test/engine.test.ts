@@ -132,3 +132,22 @@ test("spectral pitch shift matches spectral_pitch", async () => {
     }
   }
 });
+
+test("magic wand traces the clicked area; snapRow finds the loudest row", async () => {
+  const { wandRegion, snapRow } = await import("../src/view/wand.ts");
+  const cols = 30, rows = 20, data = new Uint8Array(cols * rows).fill(255);
+  for (let r = 5; r < 10; r++) for (let c = 10; c < 20; c++) data[r * cols + c] = r === 7 ? 0 : 12;   // a 10 × 5 block, loudest row 7
+  for (let r = 14; r < 16; r++) for (let c = 2; c < 6; c++) data[r * cols + c] = 0;                 // another blob, not connected
+  const img = { data, cols, rows };
+  const poly = wandRegion(img, 12.5, 7.5, 10);
+  const xs = poly.map((p) => p[0]), ys = poly.map((p) => p[1]);
+  assert.deepEqual([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], [10, 20, 5, 10]);
+  let area = 0;
+  for (let i = 0; i < poly.length; i++) { const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length]; area += x0 * y1 - x1 * y0; }
+  assert.equal(Math.abs(area) / 2, 50);
+  assert.equal(wandRegion(img, 12.5, 7.5, 3).length > 0, true);          // 3 dB: only row 7 (12 half-dB = 6 dB below)
+  const narrow = wandRegion(img, 12.5, 7.5, 3), ny = narrow.map((p) => p[1]);
+  assert.deepEqual([Math.min(...ny), Math.max(...ny)], [7, 8]);
+  assert.deepEqual(wandRegion(img, 25, 2, 20), []);                       // silence: nothing
+  assert.ok(Math.abs(snapRow(img, 9.2, 3, 10, 19) - 7.5) < 0.5);
+});

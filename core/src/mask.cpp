@@ -56,6 +56,16 @@ std::vector<double> polyRowIntervals(const std::vector<std::array<double, 2>>& p
     return xs;
 }
 
+std::vector<int> harmonicNumbers(double f0, int count, Parity parity) {
+    const int first = parity == Parity::Even ? 2 : 1, step = parity == Parity::All ? 1 : 2;
+    std::vector<int> ks;
+    for (int i = 0; i < std::max(count, 0); ++i) {
+        const int k = first + step * i;
+        if (f0 > 0 && k * f0 <= kMaxHarmonicHz) ks.push_back(k);
+    }
+    return ks;
+}
+
 std::vector<double> logFreqs(const std::vector<double>& freqs) {
     std::vector<double> P(freqs.size());
     for (size_t k = 0; k < freqs.size(); ++k) P[k] = std::log2(std::max(freqs[k], kFreqFloor));
@@ -75,7 +85,19 @@ SelectionRaster::SelectionRaster(const std::vector<Shape>& shapes, std::vector<d
         c.fo = std::max(s.fadeOut, 0.0);
         c.fades = c.fi > 0 || c.fo > 0;
         c.isRect = s.kind == ShapeKind::Rect;
-        if (c.isRect) {
+        c.isHarm = s.kind == ShapeKind::Harm;
+        if (c.isHarm) {
+            c.t0 = s.t[0];
+            c.t1 = s.t[1];
+            std::vector<double> centres;
+            for (int k : harmonicNumbers(s.f0, s.count, s.parity)) centres.push_back(std::log2(k * s.f0));
+            c.dp.resize(P_.size());
+            for (size_t k = 0; k < P_.size(); ++k) {
+                double near = kInf;
+                for (double ctr : centres) near = std::min(near, std::abs(P_[k] - ctr));
+                c.dp[k] = (s.width / 2 - near) / c.fp;
+            }
+        } else if (c.isRect) {
             c.t0 = s.t[0];
             c.t1 = s.t[1];
             c.p0 = s.f[0] > 0 ? std::log2(s.f[0]) : -kInf;
@@ -102,19 +124,21 @@ SelectionRaster::SelectionRaster(const std::vector<Shape>& shapes, std::vector<d
 void SelectionRaster::row(double t, double* out) const {
     std::fill(out, out + P_.size(), 0.0);
     for (const Compiled& s : shapes_) {
-        if (s.isRect) rectRow(s, t, out);
+        if (s.isRect || s.isHarm) boxRow(s, t, out);
         else polyRow(s, t, out);
     }
 }
 
-void SelectionRaster::rectRow(const Compiled& s, double t, double* out) const {
+// Rectangles and harmonic combs: a time span × a frequency distance (one band, or the nearest
+// band of the comb), combined like an axis-aligned box.
+void SelectionRaster::boxRow(const Compiled& s, double t, double* out) const {
     const double dt = std::min(t - s.t0, s.t1 - t) / s.ft;
     if (dt <= -0.5) return;  // fully outside in time: M_s = 0 for every bin
     const double E = s.fades ? envelope(t, {s.t0, s.t1}, s.fi, s.fo) : 1.0;
     if (E == 0) return;
     const int B = static_cast<int>(P_.size());
     for (int k = 0; k < B; ++k) {
-        const double dp = std::min(P_[k] - s.p0, s.p1 - P_[k]) / s.fp;
+        const double dp = s.isHarm ? s.dp[k] : std::min(P_[k] - s.p0, s.p1 - P_[k]) / s.fp;
         const double d = (dt >= 0 && dp >= 0) ? std::min(dt, dp) : -std::hypot(std::min(dt, 0.0), std::min(dp, 0.0));
         const double ms = s.gain * ramp(d) * E;
         if (ms != 0) combine(out, k, ms, s.mode);

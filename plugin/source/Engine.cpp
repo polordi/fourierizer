@@ -75,12 +75,20 @@ std::vector<fz::Shape> Engine::shapesOf(const juce::var& v) {
     if (auto* arr = v.getArray())
         for (auto& s : *arr) {
             fz::Shape sh;
-            sh.kind = s["kind"].toString() == "poly" ? fz::ShapeKind::Poly : fz::ShapeKind::Rect;
+            const auto kind = s["kind"].toString();
+            sh.kind = kind == "poly" ? fz::ShapeKind::Poly : kind == "harm" ? fz::ShapeKind::Harm : fz::ShapeKind::Rect;
             sh.mode = s["mode"].toString() == "subtract" ? fz::ShapeMode::Subtract : fz::ShapeMode::Add;
             sh.gain = num(s["gain"], 1.0);
             if (sh.kind == fz::ShapeKind::Rect) {
                 sh.t = {num(s["t"][0]), num(s["t"][1])};
                 sh.f = {num(s["f"][0]), num(s["f"][1])};
+            } else if (sh.kind == fz::ShapeKind::Harm) {
+                sh.t = {num(s["t"][0]), num(s["t"][1])};
+                sh.f0 = num(s["f0"], 220);
+                sh.count = (int) num(s["count"], 8);
+                sh.width = num(s["width"], 1.0 / 12);
+                const auto par = s["parity"].toString();
+                sh.parity = par == "odd" ? fz::Parity::Odd : par == "even" ? fz::Parity::Even : fz::Parity::All;
             } else if (auto* pts = s["points"].getArray()) {
                 for (auto& p : *pts) sh.points.push_back({num(p[0]), num(p[1])});
                 if (sh.points.size() < 3) continue;

@@ -59,12 +59,19 @@ Grid gridOf(const json& j) {
 
 Shape shapeOf(const json& j) {
     Shape s;
-    s.kind = j["kind"] == "rect" ? ShapeKind::Rect : ShapeKind::Poly;
+    s.kind = j["kind"] == "rect" ? ShapeKind::Rect : j["kind"] == "harm" ? ShapeKind::Harm : ShapeKind::Poly;
     s.mode = j["mode"] == "subtract" ? ShapeMode::Subtract : ShapeMode::Add;
     s.gain = j.value("gain", 1.0);
     if (s.kind == ShapeKind::Rect) {
         s.t = {j["t"][0].get<double>(), j["t"][1].get<double>()};
         s.f = {j["f"][0].get<double>(), j["f"][1].get<double>()};
+    } else if (s.kind == ShapeKind::Harm) {
+        s.t = {j["t"][0].get<double>(), j["t"][1].get<double>()};
+        s.f0 = j["f0"].get<double>();
+        s.count = j["count"].get<int>();
+        s.width = j["width"].get<double>();
+        const std::string par = j["parity"];
+        s.parity = par == "odd" ? Parity::Odd : par == "even" ? Parity::Even : Parity::All;
     } else {
         for (auto& p : j["points"]) s.points.push_back({p[0].get<double>(), p[1].get<double>()});
     }
@@ -146,7 +153,7 @@ void testMasks() {
         r.row(g["times"][m].get<double>(), row.data());
         d = std::max(d, maxAbsDiff(row, g["M"][m]));
     }
-    check(d < 1e-9, fmt("rect, concave lasso and faded eraser: max diff %.2e", d));
+    check(d < 1e-9, fmt("rects, concave lasso, faded eraser and harmonic combs: max diff %.2e", d));
 }
 
 void testRender() {

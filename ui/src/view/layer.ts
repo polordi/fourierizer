@@ -7,7 +7,8 @@ import { HELP, HOW, tip } from "./help.ts";
 import { freqToY, yToFreq, getAxis, level, type Look } from "../dsp/spectrogram.ts";
 import { Piano, noteFreq, noteOf } from "./piano.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
-import { F_FLOOR, envelope, rowIntervals, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
+import { F_FLOOR, envelope, harmonicNumbers, rowIntervals, type HarmShape, type Parity, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
+import { snapRow, wandRegion } from "./wand.ts";
 import { SR, WINDOW_LABELS, fadeLabel, fadeToKnob, featherLabel, knobToFade, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
 
 export type Mode = "grid" | "editor" | "rail";
@@ -38,6 +39,7 @@ export interface LayerHost {
   picked(): { layer: number; shape: number } | null;
   setPicked(p: { layer: number; shape: number } | null): void;
   ensureAudio(): void;
+  toast(message: string): void;
 }
 
 /** Frequency ticks for the current axis: decades on a log axis, round steps on a linear one;
@@ -364,6 +366,10 @@ export class LayerView {
   /** Bounding box of a shape in overlay units (0..1000). */
   private box(sh: Shape): { x0: number; y0: number; x1: number; y1: number } {
     if (sh.kind === "rect") return { x0: Math.max(-10, this.toX(sh.t[0])), x1: Math.min(1010, this.toX(sh.t[1])), y0: this.toY(sh.f[1]), y1: this.toY(sh.f[0]) };
+    if (sh.kind === "harm") {
+      const ks = harmonicNumbers(sh.f0, sh.count, sh.parity), top = (ks[ks.length - 1] ?? 1) * sh.f0, lo = (ks[0] ?? 1) * sh.f0, half = 2 ** (sh.width / 2);
+      return { x0: Math.max(-10, this.toX(sh.t[0])), x1: Math.min(1010, this.toX(sh.t[1])), y0: this.toY(top * half), y1: this.toY(lo / half) };
+    }
     const xs = sh.points.map((q) => this.toX(q[0])), ys = sh.points.map((q) => this.toY(q[1]));
     return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
   }
@@ -379,7 +385,7 @@ export class LayerView {
     const dur = this.duration(), k = `${JSON.stringify(sh)}|${dur}|${b.x0},${b.y0},${b.x1},${b.y1}`;
     const hit = this.fadeCache.get(k);
     if (hit) return hit;
-    const cols = 192, rows = sh.kind === "rect" ? 1 : 72;
+    const cols = 192, rows = sh.kind === "poly" ? 72 : 1;
     const c = document.createElement("canvas"); c.width = cols; c.height = rows;
     const ctx = c.getContext("2d")!, img = ctx.createImageData(cols, rows);
     for (let r = 0; r < rows; r++) {
@@ -407,6 +413,7 @@ export class LayerView {
       const cls = `sel${sh.mode === "subtract" ? " sub" : ""}${k === pk ? " picked" : ""}`;
       const geom = (): SVGElement => {
         if (sh.kind === "poly") return s("polygon", { class: cls, points: sh.points.map(([t, f]) => `${this.toX(t)},${this.toY(f)}`).join(" ") });
+        if (sh.kind === "harm") return this.combGeom(sh, cls);
         const b = this.box(sh);
         return s("rect", { class: cls, x: b.x0, y: b.y0, width: Math.max(0, b.x1 - b.x0), height: Math.max(0, b.y1 - b.y0) });
       };
@@ -432,10 +439,36 @@ export class LayerView {
     this.drawBar();
   }
 
+  /** A harmonic comb: one band per harmonic over its time span (bands thinner than 3 px are drawn 3 px). */
+  private combGeom(sh: { t: [number, number]; f0: number; count: number; width: number; parity: Parity }, cls: string): SVGElement {
+    const g = s("g", { class: "comb" }), half = 2 ** (sh.width / 2), H = this.display.clientHeight || 300, minH = 3000 / H;
+    const x0 = Math.max(-10, this.toX(sh.t[0])), x1 = Math.min(1010, this.toX(sh.t[1]));
+    for (const k of harmonicNumbers(sh.f0, sh.count, sh.parity)) {
+      const f = k * sh.f0, a = this.toY(f * half), b = this.toY(f / half);
+      if (b < -10 || a > 1010) continue;
+      const hh = Math.max(minH, b - a), y = (a + b) / 2 - hh / 2;
+      g.append(s("rect", { class: cls, x: x0, y, width: Math.max(0, x1 - x0), height: hh }));
+    }
+    return g;
+  }
+
   /** Handles of the picked shape. A rectangle resizes freely from its 8 handles; a lasso scales
    *  proportionally from the 4 corners of its box, about the opposite corner. */
   private handleSpecs(sh: Shape): { x: number; y: number; cursor: string; round?: boolean; apply: (orig: Shape, p: [number, number]) => Shape }[] {
     const b = this.box(sh), xm = (b.x0 + b.x1) / 2, ym = (b.y0 + b.y1) / 2, dur = this.duration();
+    if (sh.kind === "harm") {
+      const yf = this.toY(harmonicNumbers(sh.f0, sh.count, sh.parity)[0] * sh.f0 || sh.f0);
+      const end = (x: number, i: 0 | 1) => ({
+        x, y: yf, cursor: "ew-resize",
+        apply: (orig: Shape, p: [number, number]): Shape => {
+          const r = JSON.parse(JSON.stringify(orig)) as HarmShape;
+          r.t[i] = p[0] * dur;
+          r.t.sort((a, c) => a - c);
+          return r;
+        },
+      });
+      return [end(b.x0, 0), end(b.x1, 1)];
+    }
     if (sh.kind === "rect") {
       const spec = (x: number, y: number, cursor: string, tx: 0 | 1 | null, fy: 0 | 1 | null) => ({
         x, y, cursor,
@@ -484,7 +517,7 @@ export class LayerView {
     this.handleKey = k0;
     old().forEach((e) => e.remove());
     specs.forEach((hp, k) => {
-      const el = h("span", { class: `hd${hp.round ? " rd" : ""}`, style: `left:${hp.x / 10}%;top:${hp.y / 10}%;cursor:${hp.cursor}`, title: sh.kind === "rect" ? "Drag to resize" : "Drag to scale (keeps proportions)" });
+      const el = h("span", { class: `hd${hp.round ? " rd" : ""}`, style: `left:${hp.x / 10}%;top:${hp.y / 10}%;cursor:${hp.cursor}`, title: sh.kind === "poly" ? "Drag to scale (keeps proportions)" : "Drag to change the time span" });
       el.addEventListener("pointerdown", (e) => {
         if (e.button !== 0) return;
         e.stopPropagation(); e.preventDefault(); el.setPointerCapture(e.pointerId);
@@ -509,12 +542,16 @@ export class LayerView {
   private bar: HTMLElement | null = null;
   private barKey = "";
   private barKnobs: MiniKnob[] = [];
+  private barRefresh: { refresh(): void }[] = [];
+  private combLabel: HTMLElement | null = null;
   private drawBar(): void {
     const pk = this.pickedHere();
     if (this.mode === "rail" || pk < 0) { this.bar?.remove(); this.bar = null; this.barKey = ""; return; }
-    if (this.barKey !== String(pk) || !this.bar) {
+    const shNow = this.host.state(this.i).shapes[pk];
+    const kindKey = `${pk}:${shNow.kind}:${shNow.kind === "poly" && shNow.seed ? "wand" : ""}`;
+    if (this.barKey !== kindKey || !this.bar) {
       this.bar?.remove();
-      this.barKey = String(pk);
+      this.barKey = kindKey;
       const cur = () => this.host.state(this.i).shapes[pk];
       let gesture = false;
       const knob = (which: "fadeIn" | "fadeOut", label: string) => new MiniKnob({
@@ -526,17 +563,57 @@ export class LayerView {
         },
       });
       this.barKnobs = [knob("fadeIn", "Fade in"), knob("fadeOut", "Fade out")];
+      const extra: HTMLElement[] = [];
+      const edit = (fn: (sh: Shape) => void) => {
+        this.host.editShapes(this.i, (shapes) => { const t = shapes[pk]; if (t) fn(t); }, { undo: !gesture, render: true });
+        gesture = true;
+      };
+      if (shNow.kind === "harm") {
+        const comb = () => cur() as HarmShape;
+        this.combLabel = h("span", { class: "ro-sm ink comblabel" });
+        const count = new MiniKnob({
+          label: "Harm", aria: "Number of harmonics", tip: HELP.harmCount, reset: 15 / 31,
+          get: () => ((comb()?.count ?? 16) - 1) / 31, format: () => `${comb()?.count ?? 16}`,
+          set: (v) => edit((t) => { (t as HarmShape).count = 1 + Math.round(v * 31); }),
+        });
+        const width = new MiniKnob({
+          label: "Width", aria: "Width of each band", tip: HELP.harmWidth, reset: Math.log(4) / Math.log(24),
+          get: () => Math.log((comb()?.width ?? 1 / 12) * 48) / Math.log(24), format: () => `${Math.round((comb()?.width ?? 1 / 12) * 1200)}¢`,
+          set: (v) => edit((t) => { (t as HarmShape).width = (24 ** v) / 48; }),
+        });
+        const parity = new Segmented(null, (["all", "odd", "even"] as const).map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1), title: HELP.harmParity })),
+          () => comb()?.parity ?? "all", (id) => edit((t) => { (t as HarmShape).parity = id as Parity; }), "parity");
+        this.barKnobs.unshift(count, width);
+        this.barRefresh = [parity];
+        extra.push(h("div", { class: "combinfo" }, this.combLabel, parity.el), count.el, width.el, h("span", { class: "vseam", "aria-hidden": "true" }));
+      } else if (shNow.kind === "poly" && shNow.seed) {
+        const poly = () => cur() as PolyShape;
+        const tol = new MiniKnob({
+          label: "Range", aria: "Magic wand tolerance", tip: HELP.wandTol, reset: (15 - 3) / 45,
+          get: () => ((poly()?.seed?.tol ?? 15) - 3) / 45, format: () => `${Math.round(poly()?.seed?.tol ?? 15)} dB`,
+          set: (v) => {
+            const sd = poly()?.seed;
+            if (!sd) return;
+            const pts = this.wandPoints(sd.t, sd.f, 3 + v * 45);
+            if (pts.length >= 3) edit((t) => { const q = t as PolyShape; q.points = pts; q.seed = { ...sd, tol: 3 + v * 45 }; });
+          },
+        });
+        this.barKnobs.unshift(tol);
+        this.barRefresh = [];
+        extra.push(tol.el, h("span", { class: "vseam", "aria-hidden": "true" }));
+      } else this.barRefresh = [];
       const del = key(null, ICONS.clear, { class: "sm", "aria-label": "Delete this selection", title: "Delete this selection (Del)" }, () => {
         this.host.setPicked(null);
         this.host.editShapes(this.i, (shapes) => { shapes.splice(pk, 1); });
       });
       this.bar = h("div", { class: "shapebar", role: "group", "aria-label": "Selected area" },
-        ...this.barKnobs.map((k) => k.el), h("span", { class: "vseam", "aria-hidden": "true" }), del);
+        ...extra, ...this.barKnobs.slice(-2).map((k) => k.el), h("span", { class: "vseam", "aria-hidden": "true" }), del);
       // One undo step per knob gesture (a drag, or each key press).
       this.bar.addEventListener("pointerdown", () => { gesture = false; }, true);
       this.bar.addEventListener("keydown", () => { gesture = false; }, true);
       this.handles.append(this.bar);
-    } else this.barKnobs.forEach((k) => k.refresh());
+    } else { this.barKnobs.forEach((k) => k.refresh()); this.barRefresh.forEach((r) => r.refresh()); }
+    if (shNow.kind === "harm" && this.combLabel) this.combLabel.textContent = `${noteOf(shNow.f0)} · ${shNow.f0 < 1000 ? shNow.f0.toFixed(1) : (shNow.f0 / 1000).toFixed(2) + "k"} Hz`;
     this.positionBar();
   }
 
@@ -553,6 +630,24 @@ export class LayerView {
     this.bar.style.left = `${x}px`; this.bar.style.top = `${y}px`;
   }
 
+  /** The fundamental under a click at height v (0..1): the loudest row within a semitone, over the span [a, b] (fractions of the sound). */
+  private snapF0(v: number, a: number, b: number): number {
+    const f = yToFreq(v), img = this.img;
+    if (!img || !this.hasImage) return f;
+    const reach = Math.abs(freqToY(f * 2 ** (1 / 12)) - freqToY(f)) * img.rows;
+    const row = snapRow(img, v * img.rows, Math.max(1, reach), a * img.cols, b * img.cols);
+    return yToFreq(row / img.rows);
+  }
+
+  /** The wand's outline around (t, f) as polygon points (seconds, Hz). */
+  wandPoints(t: number, f: number, tolDb: number): [number, number][] {
+    const img = this.img;
+    if (!img || !this.hasImage) return [];
+    const dur = this.duration();
+    return wandRegion(img, t / dur * img.cols, freqToY(f) * img.rows, tolDb)
+      .map(([x, y]) => [x / img.cols * dur, yToFreq(Math.min(1, Math.max(0, y / img.rows)))] as [number, number]);
+  }
+
   private rel(e: PointerEvent): [number, number] {
     const r = this.svg.getBoundingClientRect();
     return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
@@ -564,6 +659,14 @@ export class LayerView {
 
   private inside(sh: Shape, u: number, v: number): boolean {
     if (sh.kind === "rect") return u * 1000 >= this.toX(sh.t[0]) && u * 1000 <= this.toX(sh.t[1]) && v * 1000 >= this.toY(sh.f[1]) && v * 1000 <= this.toY(sh.f[0]);
+    if (sh.kind === "harm") {
+      if (u * 1000 < this.toX(sh.t[0]) || u * 1000 > this.toX(sh.t[1])) return false;
+      const half = 2 ** (sh.width / 2), tol = 4000 / (this.display.clientHeight || 300);   // at least ±4 px
+      return harmonicNumbers(sh.f0, sh.count, sh.parity).some((k) => {
+        const a = this.toY(k * sh.f0 * half), b = this.toY(k * sh.f0 / half), m = (a + b) / 2;
+        return Math.abs(v * 1000 - m) <= Math.max((b - a) / 2, tol);
+      });
+    }
     return inPoly(u * 1000, v * 1000, sh.points.map(([t, f]) => [this.toX(t), this.toY(f)]));
   }
 
@@ -620,11 +723,16 @@ export class LayerView {
           const sh = shapes[target];
           if (!sh) return;
           if (sh.kind === "rect") { sh.t = [sh.t[0] + dt, sh.t[1] + dt]; sh.f = [shift(sh.f[0]), shift(sh.f[1])]; }
-          else sh.points = sh.points.map(([t0, f0]) => [t0 + dt, shift(f0)]);
+          else if (sh.kind === "harm") { sh.t = [sh.t[0] + dt, sh.t[1] + dt]; sh.f0 = shift(sh.f0); }
+          else { sh.points = sh.points.map(([t0, f0]) => [t0 + dt, shift(f0)]); if (sh.seed) sh.seed = { ...sh.seed, t: sh.seed.t + dt, f: shift(sh.seed.f) }; }
         }, { undo: false, render: false });
       } else if (tool === "rect" || tool === "erase") {
         const x = Math.min(start[0], p[0]) * 1000, y = Math.min(start[1], p[1]) * 1000;
         this.drawShapes(s("rect", { class: "preview", x, y, width: Math.abs(p[0] - start[0]) * 1000, height: Math.abs(p[1] - start[1]) * 1000 }));
+      } else if (tool === "harm") {
+        const dur = this.duration(), f0 = yToFreq(start[1]);
+        const pv = this.combGeom({ t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f0, count: 16, width: 1 / 12, parity: "all" }, "preview");
+        this.drawShapes(pv);
       } else if (tool === "lasso") {
         const prev = lasso[lasso.length - 1];
         if (Math.hypot((p[0] - prev[0]) * r.width, (p[1] - prev[1]) * r.height) > 3) lasso.push(p);
@@ -634,7 +742,27 @@ export class LayerView {
     const finish = (e: PointerEvent) => {
       if (act === "none") return;
       const tool = this.host.tool(), p = this.rel(e), r = this.svg.getBoundingClientRect(), dur = this.duration();
-      if (act === "draw") {
+      // the wand acts on every click (even over another selection); the comb on a drag, or a click on empty space
+      const creates = tool === "wand" ? !dragged : dragged || target < 0;
+      if (act === "draw" && (tool === "harm" || tool === "wand") && creates) {
+        // harmonic comb: drag = its time span (a click: the whole sound); the fundamental snaps to
+        // the loudest partial within a semitone. Wand: a click selects the area around it.
+        const mode = subtract ? "subtract" : "add";
+        let sh: Shape | null = null;
+        if (tool === "harm") {
+          const a = dragged ? Math.min(start[0], p[0]) : 0, b = dragged ? Math.max(start[0], p[0]) : 1;
+          sh = { kind: "harm", mode, t: [a * dur, b * dur], f0: this.snapF0(start[1], a, b), count: 16, width: 1 / 12, parity: "all" };
+        } else {
+          const t = start[0] * dur, f = yToFreq(start[1]), pts = this.wandPoints(t, f, 15);
+          if (pts.length >= 3) sh = { kind: "poly", mode, points: pts, seed: { t, f, tol: 15 } };
+          else this.host.toast("Nothing to select there: click on something you can see in the spectrogram");
+        }
+        if (sh) {
+          const add = sh;
+          this.host.editShapes(this.i, (shapes) => { shapes.push(add); });
+          this.host.setPicked({ layer: this.i, shape: this.host.state(this.i).shapes.length - 1 });
+        }
+      } else if (act === "draw") {
         if (!dragged) this.host.setPicked(target >= 0 ? { layer: this.i, shape: target } : null);
         else if ((tool === "rect" || tool === "erase") && Math.abs(p[0] - start[0]) * r.width > 4 && Math.abs(p[1] - start[1]) * r.height > 4) {
           const sh: Shape = { kind: "rect", mode: subtract ? "subtract" : "add", t: [Math.min(start[0], p[0]) * dur, Math.max(start[0], p[0]) * dur], f: [yToFreq(Math.max(start[1], p[1])), yToFreq(Math.min(start[1], p[1]))] };

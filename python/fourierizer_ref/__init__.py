@@ -12,12 +12,12 @@ docs/plan/PLAN.md §4. The C++ core is tested against the outputs of this packag
 
 from .windows import WINDOWS, make_window
 from .stft import Grid, stft, istft, nola_min, frame_times, bin_freqs
-from .mask import Rect, Polygon, Selection
+from .mask import Harmonic, Rect, Polygon, Selection
 from .render import Layer, render
 
 __all__ = [
     "WINDOWS", "make_window",
     "Grid", "stft", "istft", "nola_min", "frame_times", "bin_freqs",
-    "Rect", "Polygon", "Selection",
+    "Harmonic", "Rect", "Polygon", "Selection",
     "Layer", "render",
 ]

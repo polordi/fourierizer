@@ -52,6 +52,8 @@ export const ICONS = {
   display: '<path d="M2 13h12M3 11V8M6 11V4M9 11V6M12 11V3"/>',
   fresh: '<path d="M4 2h5l3 3v9H4zM9 2v3h3M6.5 9.5h3M8 8v3"/>',
   keep: '<path d="M4 2h8v12l-4-3-4 3z"/>',
+  harm: '<path d="M2 13h12M2 10h12M2 7.5h12M2 5.5h12M2 4h12" stroke-dasharray="2 1.2"/>',
+  wand: '<path d="M2 14 9.5 6.5M11 2v2.5M14 5h-2.5M13 3l-1.5 1.5M9 3.5l1 1"/>',
   takes: '<path d="M2 4h9M2 8h9M2 12h6M13 3v5M13 11v2"/>',
 };
 

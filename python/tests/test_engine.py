@@ -208,3 +208,23 @@ def test_spectral_pitch_zero_is_identity_and_keeps_stereo_image():
     y = spectral_pitch(np.stack([left, 0.5 * left]), 5)
     mid = slice(sr // 8, -sr // 8)
     assert np.allclose(y[1][mid], 0.5 * y[0][mid], atol=1e-9)   # same rotation on both channels
+
+
+# ---- Harmonic comb selection -----------------------------------------------------------------
+from fourierizer_ref.mask import Harmonic, harmonic_numbers  # noqa: E402
+
+
+def test_harmonic_numbers_by_parity():
+    assert harmonic_numbers(100, 4, "all") == [1, 2, 3, 4]
+    assert harmonic_numbers(100, 4, "odd") == [1, 3, 5, 7]
+    assert harmonic_numbers(100, 4, "even") == [2, 4, 6, 8]
+    assert harmonic_numbers(10000, 5, "all") == [1, 2]          # nothing above 24 kHz
+
+
+def test_harmonic_mask_selects_the_comb_only():
+    sel = Selection((Harmonic(t=(0, 1), f0=200, count=3, width=1 / 12, feather_s=0, feather_oct=0),))
+    M = sel.rasterize(np.array([0.5]), np.array([200, 300, 400, 500, 600, 800, 200 * 2 ** (1 / 30)]))[0]
+    assert M.tolist() == [1, 0, 1, 0, 1, 0, 1]                   # 800 Hz is the 4th harmonic: excluded
+    odd = Selection((Harmonic(t=(0, 1), f0=200, count=3, parity="odd", feather_s=0, feather_oct=0),))
+    assert odd.rasterize(np.array([0.5]), np.array([200, 400, 600, 1000]))[0].tolist() == [1, 0, 1, 1]
+    assert sel.rasterize(np.array([1.5]), np.array([200]))[0, 0] == 0   # outside in time

@@ -8,8 +8,22 @@ export type Mode = "add" | "subtract";
 
 interface ShapeBase { mode: Mode; gain?: number; featherS?: number; featherOct?: number; fadeIn?: number; fadeOut?: number; }
 export interface RectShape extends ShapeBase { kind: "rect"; t: [number, number]; f: [number, number]; }
-export interface PolyShape extends ShapeBase { kind: "poly"; points: [number, number][]; }
-export type Shape = RectShape | PolyShape;
+/** seed: made by the magic wand from a click at (t s, f Hz) with a tolerance in dB (UI only). */
+export interface PolyShape extends ShapeBase { kind: "poly"; points: [number, number][]; seed?: { t: number; f: number; tol: number }; }
+export type Parity = "all" | "odd" | "even";
+/** Harmonic comb: during t, bands `width` octaves wide on the harmonics k·f0 of a parity. */
+export interface HarmShape extends ShapeBase { kind: "harm"; t: [number, number]; f0: number; count: number; width: number; parity: Parity; }
+export type Shape = RectShape | PolyShape | HarmShape;
+
+export const MAX_HARMONIC_HZ = 24000;
+
+/** The first `count` harmonic numbers of a parity, below MAX_HARMONIC_HZ. */
+export function harmonicNumbers(f0: number, count: number, parity: Parity): number[] {
+  const [first, step] = parity === "odd" ? [1, 2] : parity === "even" ? [2, 2] : [1, 1];
+  const ks: number[] = [];
+  for (let i = 0; i < Math.max(Math.floor(count), 0); i++) { const k = first + step * i; if (f0 > 0 && k * f0 <= MAX_HARMONIC_HZ) ks.push(k); }
+  return ks;
+}
 
 export const F_FLOOR = 1.0;
 
@@ -53,7 +67,7 @@ export function polyRowIntervals(points: [number, number][], phi: number): numbe
 
 /** Time intervals of any shape on the row φ (a rectangle covers [t0, t1] on every row). */
 export function rowIntervals(s: Shape, phi: number): number[] {
-  return s.kind === "rect" ? [s.t[0], s.t[1]] : polyRowIntervals(s.points, phi);
+  return s.kind === "poly" ? polyRowIntervals(s.points, phi) : [s.t[0], s.t[1]];
 }
 
 /** log₂ of each bin frequency, with the DC bin mapped to F_FLOOR (as in Python). */
@@ -66,6 +80,7 @@ export function logFreqs(freqs: Float64Array): Float64Array {
 interface Compiled {
   mode: Mode; gain: number; ft: number; fp: number; fi: number; fo: number; fades: boolean;
   rect?: { t0: number; t1: number; p0: number; p1: number };
+  harm?: { t0: number; t1: number; centres: Float64Array; half: number; rows?: { P: Float64Array; dp: Float64Array } };
   poly?: { vx: Float64Array; vy: Float64Array; minX: number; maxX: number; minY: number; maxY: number; points: [number, number][]; rows?: { P: Float64Array; iv: number[][] } };
 }
 
@@ -77,7 +92,9 @@ export class SelectionRaster {
       const ft = Math.max(s.featherS ?? featherS, 1e-9), fp = Math.max(s.featherOct ?? featherOct, 1e-9);
       const fi = Math.max(s.fadeIn ?? 0, 0), fo = Math.max(s.fadeOut ?? 0, 0);
       const c: Compiled = { mode: s.mode, gain: s.gain ?? 1, ft, fp, fi, fo, fades: fi > 0 || fo > 0 };
-      if (s.kind === "rect") {
+      if (s.kind === "harm") {
+        c.harm = { t0: s.t[0], t1: s.t[1], centres: new Float64Array(harmonicNumbers(s.f0, s.count, s.parity).map((k) => Math.log2(k * s.f0))), half: s.width / 2 };
+      } else if (s.kind === "rect") {
         c.rect = {
           t0: s.t[0], t1: s.t[1],
           p0: s.f[0] > 0 ? Math.log2(s.f[0]) : -Infinity,
@@ -100,6 +117,7 @@ export class SelectionRaster {
     out.fill(0);
     for (const s of this.shapes) {
       if (s.rect) this.rectRow(s, t, P, out);
+      else if (s.harm) this.harmRow(s, t, P, out);
       else this.polyRow(s, t, P, out);
     }
   }
@@ -120,6 +138,30 @@ export class SelectionRaster {
       const d = dt >= 0 && dp >= 0 ? Math.min(dt, dp) : -Math.hypot(Math.min(dt, 0), Math.min(dp, 0));
       const ms = s.gain * ramp(d) * E;
       if (ms !== 0) this.combine(out, k, ms, s.mode); // M_s = 0 leaves M unchanged in both modes
+    }
+  }
+
+  private harmRow(s: Compiled, t: number, P: Float64Array, out: Float64Array): void {
+    const r = s.harm!;
+    const dt = Math.min(t - r.t0, r.t1 - t) / s.ft;
+    if (dt <= -0.5) return;
+    const E = s.fades ? envelope(t, [r.t0, r.t1], s.fi, s.fo) : 1;
+    if (E === 0) return;
+    if (r.rows?.P !== P) {   // distance to the nearest band, per bin (it does not depend on t)
+      const dp = new Float64Array(P.length);
+      for (let k = 0; k < P.length; k++) {
+        let near = Infinity;
+        for (let j = 0; j < r.centres.length; j++) { const a = Math.abs(P[k] - r.centres[j]); if (a < near) near = a; }
+        dp[k] = (r.half - near) / s.fp;
+      }
+      r.rows = { P, dp };
+    }
+    const dpRow = r.rows.dp;
+    for (let k = 0; k < P.length; k++) {
+      const dp = dpRow[k];
+      const d = dt >= 0 && dp >= 0 ? Math.min(dt, dp) : -Math.hypot(Math.min(dt, 0), Math.min(dp, 0));
+      const ms = s.gain * ramp(d) * E;
+      if (ms !== 0) this.combine(out, k, ms, s.mode);
     }
   }
 

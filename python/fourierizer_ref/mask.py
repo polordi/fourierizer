@@ -21,6 +21,13 @@ where a zero fade contributes a factor 1. The shape's mask becomes M_s = a_s · 
 outside a polygon's frequency range use the nearest covered row, so the frequency feather stays
 continuous across the top and bottom edges.
 
+A harmonic comb (Harmonic) selects, during [t0, t1], bands `width` octaves wide centred on the
+harmonics k·f0 (all k, odd k or even k). Its frequency distance is that of the nearest band:
+
+    d_φ = (width/2 − min_k |φ − log₂(k·f0)|) / feather_oct,
+
+combined with the time distance exactly like a rectangle.
+
 Shapes combine in order, like layers in an image editor:
 
     add:       M ← M + (1 − M) · M_s
@@ -107,6 +114,43 @@ class Rect(_Shape):
         # Distance to an axis-aligned box in the scaled plane (exact, including corners).
         dt = np.minimum(T - self.t[0], self.t[1] - T) / ft
         dp = np.minimum(P - p0, p1 - P) / fp
+        inside = np.minimum(dt, dp)
+        outside = -np.hypot(np.minimum(dt, 0), np.minimum(dp, 0))
+        return np.where((dt >= 0) & (dp >= 0), inside, outside)
+
+    def row_intervals(self, phi):
+        return [(self.t[0], self.t[1])]
+
+
+MAX_HARMONIC_HZ = 24000.0   # harmonics above this (Nyquist at 48 kHz) are left out
+
+
+def harmonic_numbers(f0: float, count: int, parity: str) -> list[int]:
+    """The first `count` harmonic numbers of the parity ('all', 'odd', 'even') below MAX_HARMONIC_HZ."""
+    step, first = (2, 1) if parity == "odd" else (2, 2) if parity == "even" else (1, 1)
+    ks = [first + step * i for i in range(max(int(count), 0))]
+    return [k for k in ks if f0 > 0 and k * f0 <= MAX_HARMONIC_HZ]
+
+
+@dataclass(frozen=True)
+class Harmonic(_Shape):
+    """Harmonic comb: during [t0, t1], bands `width` octaves wide on the harmonics k·f0."""
+
+    t: tuple[float, float] = (0.0, 1.0)
+    f0: float = 220.0
+    count: int = 8
+    width: float = 1 / 12           # octaves, full width of each band
+    parity: Literal["all", "odd", "even"] = "all"
+
+    def signed_distance(self, T, P):
+        ft = max(self.feather_s, 1e-9)
+        fp = max(self.feather_oct, 1e-9)
+        centres = np.log2([k * self.f0 for k in harmonic_numbers(self.f0, self.count, self.parity)])
+        dt = np.minimum(T - self.t[0], self.t[1] - T) / ft
+        if len(centres) == 0:
+            return np.full(T.shape, -np.inf)
+        near = np.min(np.abs(P[..., None] - centres), axis=-1)
+        dp = (self.width / 2 - near) / fp
         inside = np.minimum(dt, dp)
         outside = -np.hypot(np.minimum(dt, 0), np.minimum(dp, 0))
         return np.where((dt >= 0) & (dp >= 0), inside, outside)

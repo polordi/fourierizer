@@ -39,10 +39,11 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 
 /* app frame */
 #app { box-sizing: border-box; height: 100%; min-height: 760px; min-width: 1180px; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
-.top { height: 44px; flex: none; display: flex; align-items: center; gap: 16px; }
+.top { height: 44px; flex: none; display: flex; align-items: center; gap: 12px; }
 .brand .silk { white-space: nowrap; }
-.brand { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
-.wordmark { font: 800 32px/1 var(--font-sans); letter-spacing: -0.02em; }
+.brand { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }   /* subtitle under the wordmark: the header has 7 tools */
+.wordmark { font: 800 30px/1 var(--font-sans); letter-spacing: -0.02em; }
+.brand .silk { font-size: 9px; line-height: 10px; }
 .group { display: flex; align-items: center; gap: 10px; }
 
 /* module */
@@ -135,7 +136,8 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 @keyframes fz-pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .cursor-ro { position: absolute; top: 6px; right: 6px; padding: 1px 4px; background: var(--display); border: 1px solid var(--ink); pointer-events: none; }
 .empty-hint { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 8px; pointer-events: none; }
-.tool-rect svg.ov, .tool-lasso svg.ov, .tool-erase svg.ov { cursor: crosshair; }
+.tool-rect svg.ov, .tool-lasso svg.ov, .tool-erase svg.ov, .tool-harm svg.ov { cursor: crosshair; }
+.tool-wand svg.ov { cursor: cell; }
 .tool-move svg.ov { cursor: default; }
 .mode-rail svg.ov { cursor: pointer; }
 
@@ -253,7 +255,7 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .displaypanel .row { display: flex; gap: 16px; align-items: flex-end; }
 .displaypanel .stepper .body { grid-template-columns: 26px minmax(52px, auto) 26px; }
 .displaypanel .stepper .val { font-size: 15px; }
-.top .seg-opt { padding: 6px 8px; min-width: 40px; }
+.top .seg-opt { padding: 6px 6px; min-width: 36px; }
 .top .brand { margin-right: 12px; }
 
 /* Result analysis: covers the layers area. Spectrogram (with the piano axis) and spectrum slice
@@ -297,3 +299,13 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .tactions { display: grid; gap: 6px; justify-items: end; }
 .tsend { display: flex; align-items: center; gap: 4px; }
 .tsend .key { min-width: 24px; padding: 0 4px; }
+
+/* Harmonic comb controls in the selected-shape bar */
+.shapebar .combinfo { display: grid; gap: 4px; justify-items: start; }
+.shapebar .seg.parity .seg-opt { min-width: 0; padding: 3px 6px; font-size: 10px; }
+.comblabel { white-space: nowrap; }
+/* a comb has many thin bands: a light outline, so the spectrogram under it stays readable */
+.comb .sel { stroke: var(--layer-deep); stroke-width: 1; stroke-dasharray: none; fill-opacity: .25; }
+.comb .sel.picked { stroke: var(--ink); stroke-width: 1; fill-opacity: .4; }
+.comb .sel.sub { stroke-dasharray: 2 2; }
+.comb .preview { stroke-width: 1; }

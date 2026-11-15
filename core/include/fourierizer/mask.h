@@ -14,7 +14,8 @@
 
 namespace fz {
 
-enum class ShapeKind { Rect, Poly };
+enum class ShapeKind { Rect, Poly, Harm };
+enum class Parity { All, Odd, Even };
 enum class ShapeMode { Add, Subtract };
 
 struct Shape {
@@ -24,11 +25,18 @@ struct Shape {
     std::array<double, 2> t{0, 1};                   // rect: seconds
     std::array<double, 2> f{20, 20000};              // rect: Hz (≤ 0 means "down to DC")
     std::vector<std::array<double, 2>> points;       // poly: (seconds, Hz)
+    double f0 = 220, width = 1.0 / 12;               // harm: fundamental (Hz), band width (octaves)
+    int count = 8;                                   // harm: how many harmonics of the parity
+    Parity parity = Parity::All;                     // harm: t is its time span
     std::optional<double> featherS, featherOct;      // per shape; else the layer's
     double fadeIn = 0.0, fadeOut = 0.0;              // seconds, inside the selection
 };
 
 constexpr double kFreqFloor = 1.0;  // Hz; the DC bin is mapped here for log₂
+constexpr double kMaxHarmonicHz = 24000.0;
+
+/// The first `count` harmonic numbers of a parity, below kMaxHarmonicHz.
+std::vector<int> harmonicNumbers(double f0, int count, Parity parity);
 
 double ramp(double d);
 double fade(double u);
@@ -55,14 +63,15 @@ private:
     struct Compiled {
         ShapeMode mode;
         double gain, ft, fp, fi, fo;
-        bool fades, isRect;
+        bool fades, isRect, isHarm;
         double t0, t1, p0, p1;                       // rect
         std::vector<double> vx, vy;                  // poly, scaled by the feathers
         double minX, maxX, minY, maxY;
         std::vector<std::vector<double>> rows;       // poly with fades: intervals per bin
+        std::vector<double> dp;                      // harm: frequency distance per bin
     };
-    void rectRow(const Compiled& s, double t, double* out) const;
     void polyRow(const Compiled& s, double t, double* out) const;
+    void boxRow(const Compiled& s, double t, double* out) const;   // rect and harm
 
     std::vector<Compiled> shapes_;
     std::vector<double> P_;

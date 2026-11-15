@@ -11,7 +11,7 @@ import type { SpectralWindow } from "./dsp/spectral.ts";
 export const SR = 48000;
 export const MAX_SECONDS = 60;
 
-export type Tool = "rect" | "lasso" | "erase" | "move";
+export type Tool = "rect" | "lasso" | "harm" | "wand" | "erase" | "move";
 
 export interface LayerState {
   index: number;
