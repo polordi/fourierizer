@@ -309,3 +309,15 @@ body { margin: 0; background: var(--chassis); color: var(--ink); font: 400 14px/
 .comb .sel.picked { stroke: var(--ink); stroke-width: 1; fill-opacity: .4; }
 .comb .sel.sub { stroke-dasharray: 2 2; }
 .comb .preview { stroke-width: 1; }
+
+/* Load menu of a layer: a file, or a recent capture from Fourierizer Capture */
+.loadwrap { position: relative; display: inline-flex; }
+.loadmenu { position: absolute; z-index: 40; top: calc(100% + 8px); right: 0; width: 320px; display: grid; gap: 8px; padding: 12px;
+  background: var(--panel); border: 1.5px solid var(--ink); border-radius: var(--radius-md); box-shadow: 0 3px 0 var(--ink); animation: fz-pop 160ms ease-out both; }
+.loadmenu[hidden] { display: none; }
+.loadmenu > .key { justify-self: start; }
+.caplist { display: grid; gap: 2px; max-height: 280px; overflow-y: auto; }
+.caprow { all: unset; cursor: pointer; display: grid; gap: 1px; padding: 6px 8px; border-radius: var(--radius-sm); }
+.caprow:hover, .caprow:focus-visible { background: var(--display); box-shadow: inset 0 0 0 1px var(--seam); }
+.capname { font: 600 13px/16px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.caphint { white-space: normal; line-height: 15px; }

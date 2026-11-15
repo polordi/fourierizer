@@ -47,6 +47,7 @@ export const HELP = {
   harmWidth: "Width of each band, in cents (100 = one semitone). Wider catches vibrato and detuned partials; narrower isolates the pure harmonics.",
   harmParity: "Which harmonics: all of them, only the odd ones (1, 3, 5…: hollow, like a clarinet) or only the even ones (2, 4, 6…: the octave up, brighter).",
   wandTol: "How far below the clicked point's level the wand still selects, in dB. More takes in quieter surroundings (tails, reverb); less keeps only the loud core.",
+  capturesEmpty: "No captures yet. In FL Studio, insert Fourierizer Capture on a mixer track and press REC (or turn on Record while playing): what you record appears here.",
   scale: "Log spreads the octaves evenly (like hearing); Lin gives every Hz the same space (like Wave Candy's linear view).",
   lowHz: "Lowest frequency shown.",
   highHz: "Highest frequency shown.",

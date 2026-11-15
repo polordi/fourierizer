@@ -6,7 +6,7 @@
 import type { Grid } from "./dsp/stft.ts";
 import type { Axis, SpectrogramImage, Analysis, AnalysisRequest } from "./dsp/spectrogram.ts";
 import type { LayerJob } from "./protocol.ts";
-import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo, TakeInfo } from "./host.ts";
+import type { Host, PlayState, RenderJob, Restored, ResultInfo, SamplerParams, SourceInfo, TakeInfo, CaptureInfo } from "./host.ts";
 
 interface JuceBackend {
   emitEvent(id: string, payload: unknown): void;
@@ -123,6 +123,8 @@ export class PluginHost implements Host {
   }
 
   clearSource(i: number): void { void this.call("clearLayer", i); }
+  async captures(): Promise<CaptureInfo[]> { const r = await this.call<CaptureInfo[] | null>("captures"); return Array.isArray(r) ? r : []; }
+  loadCapture(i: number, path: string): Promise<SourceInfo> { return this.checked<SourceInfo>("loadCapture", i, path); }
 
   async spectrogram(i: number, pitch: number, grid: Grid, _sr: number, axis: Axis): Promise<SpectrogramImage> {
     const r = await this.checked<ImageRef & { duration: number }>("spectrogram", i, pitch, grid, axis);

@@ -29,6 +29,8 @@ from each sound, and synthesize a brand-new sound from those selections — then
 ```
 core/      C++ synthesis engine (no framework dependency) + golden tests
 plugin/    JUCE plugin: processor, sampler, engine service (renders, state), WebView editor
+capture/   Fourierizer Capture: mixer effect that records a track for the instrument
+shared/    Code shared by the two plugins (the captures folder)
 ui/        Web UI (TypeScript) used by the plugin and by the browser demo
 python/    Reference implementation and golden test vectors
 docs/      Plan, architecture decisions, learning notes, design, theory

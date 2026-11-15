@@ -9,6 +9,7 @@ import { Piano, noteFreq, noteOf } from "./piano.ts";
 import { makeWindow, WINDOW_NAMES, type WindowName } from "../dsp/windows.ts";
 import { F_FLOOR, envelope, harmonicNumbers, rowIntervals, type HarmShape, type Parity, type PolyShape, type RectShape, type Shape } from "../dsp/mask.ts";
 import { snapRow, wandRegion } from "./wand.ts";
+import type { CaptureInfo } from "../host.ts";
 import { SR, WINDOW_LABELS, fadeLabel, fadeToKnob, featherLabel, knobToFade, pitchedSeconds, type LayerState, type Tool } from "../model.ts";
 
 export type Mode = "grid" | "editor" | "rail";
@@ -24,7 +25,9 @@ export interface LayerHost {
   load(i: number, file: File): void;
   /** Opens the host's file dialog; false means the view should use its own file input. */
   pickFile(i: number): boolean;
-  capture(i: number): void;
+  /** Recent captures (plugin only; null in the browser), and loading one into a layer. */
+  captures(): Promise<CaptureInfo[]> | null;
+  loadCapture(i: number, c: CaptureInfo): void;
   toggleMute(i: number): void;
   toggleSolo(i: number): void;
   togglePreview(i: number): void;
@@ -178,7 +181,7 @@ export class LayerView {
         key("Clear", ICONS.clear, { class: "sm", title: "Remove every selection on this layer" }, () => host.editShapes(i, (sh) => { sh.length = 0; }))),
       h("span", { class: "full actions" },
         this.led,
-        key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound (or drop a file here)" }, () => { host.ensureAudio(); if (!host.pickFile(i)) this.fileInput.click(); }),
+        h("span", { class: "loadwrap" }, this.loadKey = key(null, ICONS.load, { class: "sm", "aria-label": `Load a sound into layer ${n}`, title: "Load a sound or a capture (or drop a file here)" }, () => this.openLoad()), this.loadMenu),
         // Capture from the mixer returns with the Fourierizer Capture plugin (H8).
         this.removeB = confirmKey(key(null, ICONS.eject, { class: "sm", "aria-label": `Remove the sound from layer ${n}`, title: HELP.remove }), () => host.removeSound(i))),
       this.origB, this.playB, this.muteB, this.soloB, this.focusB, this.fileInput);
@@ -355,6 +358,33 @@ export class LayerView {
   }
 
   private duration(): number { const l = this.host.state(this.i); return l.loaded ? pitchedSeconds(l) : 4; }
+
+  // ---------------------------------------------------------------- load menu: a file, or a recent capture
+  private loadKey!: HTMLButtonElement;
+  private loadMenu = h("div", { class: "loadmenu", hidden: true, role: "menu" });
+  private openLoad(): void {
+    this.host.ensureAudio();
+    const list = this.host.captures();
+    if (!list) { if (!this.host.pickFile(this.i)) this.fileInput.click(); return; }   // browser: straight to the file picker
+    if (!this.loadMenu.hidden) { this.loadMenu.hidden = true; return; }
+    const close = () => { this.loadMenu.hidden = true; document.removeEventListener("pointerdown", outside, true); };
+    const outside = (e: PointerEvent) => { if (!this.loadMenu.contains(e.target as Node) && e.target !== this.loadKey && !this.loadKey.contains(e.target as Node)) close(); };
+    const browse = key("Browse files…", ICONS.load, { class: "sm" }, () => { close(); if (!this.host.pickFile(this.i)) this.fileInput.click(); });
+    const rows = h("div", { class: "caplist" }, h("span", { class: "ro-sm" }, "Looking for captures…"));
+    this.loadMenu.replaceChildren(browse, h("span", { class: "silk sm" }, "Recent captures"), rows);
+    this.loadMenu.hidden = false;
+    document.addEventListener("pointerdown", outside, true);
+    list.then((caps) => {
+      if (!caps.length) { rows.replaceChildren(h("span", { class: "ro-sm caphint" }, HELP.capturesEmpty)); return; }
+      const ago = (ms: number) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(ms).toLocaleDateString(); };
+      rows.replaceChildren(...caps.map((c) => {
+        const b = h("button", { class: "caprow", type: "button", role: "menuitem", title: c.path },
+          h("span", { class: "capname" }, c.name), h("span", { class: "ro-sm" }, `${c.seconds.toFixed(1)} s · ${ago(c.modified)}`));
+        b.addEventListener("click", () => { close(); this.host.loadCapture(this.i, c); });
+        return b;
+      }));
+    }).catch(() => rows.replaceChildren(h("span", { class: "ro-sm" }, "Could not read the captures folder")));
+  }
 
   // ---------------------------------------------------------------- shapes
   private toX(t: number): number { return t / this.duration() * 1000; }

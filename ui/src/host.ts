@@ -13,6 +13,8 @@ import { MAX_SECONDS, SR, adsrMap } from "./model.ts";
 
 /** origin: the take this sound came from (0 = a file). */
 export interface SourceInfo { name: string; samples: number; channels: number; trimmed?: boolean; origin?: number; }
+/** A file recorded by Fourierizer Capture. */
+export interface CaptureInfo { name: string; path: string; seconds: number; modified: number; }
 /** A kept result with its recipe (layers, selections, operation). */
 export interface TakeInfo {
   id: number; name: string; created: number; duration: number; op: string;
@@ -39,6 +41,9 @@ export interface Host {
   /** Native file dialog (plugin), or null when the UI should use its own <input type=file>. */
   pickFile(i: number): Promise<SourceInfo | null> | null;
   clearSource(i: number): void;
+  /** Recent captures from Fourierizer Capture, newest first (null: not available here). */
+  captures(): Promise<CaptureInfo[]> | null;
+  loadCapture(i: number, path: string): Promise<SourceInfo>;
   spectrogram(i: number, pitch: number, grid: Grid, sr: number, axis: Axis): Promise<SpectrogramImage>;
   render(job: RenderJob): Promise<ResultInfo>;
   /** The current result's display image on another axis (null without a result). */
@@ -143,6 +148,8 @@ export class BrowserHost implements Host {
   }
 
   pickFile(): null { return null; }
+  captures(): null { return null; }
+  loadCapture(): Promise<SourceInfo> { return Promise.reject(new Error("Captures need the plugin")); }
 
   clearSource(i: number): void {
     if (this.sampler.previewLayer === i) this.sampler.stopPreview();

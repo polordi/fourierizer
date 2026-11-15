@@ -23,7 +23,7 @@ else()
 endif()
 
 juce_add_plugin(Fourierizer
-    VERSION                 0.7.0
+    VERSION                 0.8.0
     COMPANY_NAME            "waves_p"
     BUNDLE_ID               "com.wavesp.fourierizer"
     PLUGIN_MANUFACTURER_CODE Wvsp
@@ -51,6 +51,8 @@ target_sources(Fourierizer PRIVATE
     source/Engine.cpp
     source/PluginProcessor.cpp
     source/PluginEditor.cpp)
+
+target_include_directories(Fourierizer PRIVATE "${CMAKE_SOURCE_DIR}/shared")   # Captures.h
 
 target_compile_definitions(Fourierizer PUBLIC
     JUCE_WEB_BROWSER=1

@@ -77,6 +77,12 @@ jobs:
           t=$(find build/release/plugin -type f \( -name 'FourierizerSamplerTest' -o -name 'FourierizerSamplerTest.exe' \) | head -1)
           "$t"
 
+      - name: Capture test (record while playing, REC, 60 s limit)
+        shell: bash
+        run: |
+          t=$(find build/release/capture -type f \( -name 'FourierizerCaptureTest' -o -name 'FourierizerCaptureTest.exe' \) | head -1)
+          "$t"
+
       - name: Download pluginval
         shell: bash
         run: |
@@ -88,7 +94,7 @@ jobs:
         run: |
           shopt -s nullglob
           status=0
-          for p in build/release/plugin/*_artefacts/Release/VST3/*.vst3 build/release/spikes/*/*_artefacts/Release/VST3/*.vst3; do
+          for p in build/release/plugin/*_artefacts/Release/VST3/*.vst3 build/release/capture/*_artefacts/Release/VST3/*.vst3 build/release/spikes/*/*_artefacts/Release/VST3/*.vst3; do
             echo "::group::pluginval $p"
             "./pluginval/${{ matrix.pluginval_bin }}" --strictness-level 8 --skip-gui-tests --validate-in-process --validate "$p" || status=1
             echo "::endgroup::"
@@ -101,6 +107,7 @@ jobs:
           name: plugins-${{ runner.os }}
           path: |
             build/release/plugin/*_artefacts/Release/VST3/*.vst3
+            build/release/capture/*_artefacts/Release/VST3/*.vst3
             build/release/spikes/*/*_artefacts/Release/VST3/*.vst3
           if-no-files-found: error
 

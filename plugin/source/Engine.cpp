@@ -5,6 +5,8 @@
 
 #include <chrono>
 
+#include <Captures.h>
+
 namespace fzp {
 
 namespace {
@@ -433,6 +435,28 @@ bool Engine::writeResultWav(const juce::File& file) const {
     for (int c = 0; c < 2; ++c)
         for (int i = 0; i < n; ++i) buf.setSample(c, i, (float) (*r)[(size_t) std::min<size_t>((size_t) c, r->size() - 1)][(size_t) i]);
     return w->writeFromAudioSampleBuffer(buf, 0, n);
+}
+
+// ------------------------------------------------------------------------------ captures
+juce::var Engine::captures() {
+    auto files = fzshared::capturesFolder().findChildFiles(juce::File::findFiles, false, "*.wav;*.aif;*.aiff;*.flac");
+    std::sort(files.begin(), files.end(), [](const juce::File& a, const juce::File& b) { return a.getLastModificationTime() > b.getLastModificationTime(); });
+    juce::Array<juce::var> list;
+    for (const auto& f : files) {
+        if (f.getFileName().startsWith("Recording")) continue;   // still being written by Capture
+        std::unique_ptr<juce::AudioFormatReader> r(formats_.createReaderFor(f));
+        if (r == nullptr || r->sampleRate <= 0) continue;
+        list.add(obj({{"name", f.getFileNameWithoutExtension()}, {"path", f.getFullPathName()},
+                      {"seconds", (double) r->lengthInSamples / r->sampleRate}, {"modified", (double) f.getLastModificationTime().toMilliseconds()}}));
+        if (list.size() >= 30) break;
+    }
+    return list;
+}
+
+void Engine::loadCapture(int layer, const juce::String& path, Done done) {
+    const juce::File f(path);
+    if (!f.isAChildOf(fzshared::capturesFolder()) || !f.existsAsFile()) return done(errorVar("This capture is no longer there"));
+    decodeFile(layer, f, std::move(done));
 }
 
 // ------------------------------------------------------------------------------ takes

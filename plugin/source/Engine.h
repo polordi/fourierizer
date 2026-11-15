@@ -42,6 +42,9 @@ public:
     juce::var sourceInfo(int layer) const;   // {name, samples, channels, origin}
     void decodeBytes(int layer, juce::MemoryBlock bytes, const juce::String& name, Done done);
     void decodeFile(int layer, const juce::File& file, Done done);
+    /// Recent files written by Fourierizer Capture, newest first: [{name, path, seconds, modified}].
+    juce::var captures();
+    void loadCapture(int layer, const juce::String& path, Done done);
     juce::var resultToLayer(int layer, const juce::String& name, int origin = 0);
     void clearSource(int layer);
     void clearResult();

@@ -114,6 +114,8 @@ juce::WebBrowserComponent::Options FourierizerEditor::options() {
         .withNativeFunction("allOff", [&sampler](Args, Completion done) { sampler.uiAllOff(); done(true); })
         .withNativeFunction("setParams", [this](Args a, Completion done) { proc_.setSamplerParams(a[0]); done(true); })
         .withNativeFunction("resultToLayer", [&engine](Args a, Completion done) { done(engine.resultToLayer((int) a[0], a[1].toString(), a.size() > 2 ? (int) a[2] : 0)); })
+        .withNativeFunction("captures", [&engine](Args, Completion done) { done(engine.captures()); })
+        .withNativeFunction("loadCapture", [this](Args a, Completion done) { proc_.engine.loadCapture((int) a[0], a[1].toString(), later(std::move(done))); })
         .withNativeFunction("keepTake", [&engine](Args a, Completion done) { done(engine.keepTake(a[0].toString(), a.size() > 1 ? a[1].toString() : juce::String())); })
         .withNativeFunction("takes", [&engine](Args, Completion done) { done(engine.takes()); })
         .withNativeFunction("restoreTake", [this](Args a, Completion done) { proc_.engine.restoreTake((int) a[0], later(std::move(done))); })

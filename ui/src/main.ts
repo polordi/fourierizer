@@ -113,8 +113,12 @@ class App implements LayerHost {
     p.then((info) => { if (info) this.applySource(i, info, false); }).catch((e: Error) => this.toast(e.message));
     return true;
   }
-  capture(_i: number): void {
-    this.toast("Capturing from the mixer arrives with the Fourierizer Capture plugin (milestone H8).");
+  captures() { return this.host.captures(); }
+  loadCapture(i: number, c: { name: string; path: string }): void {
+    this.toast(`Loading ${c.name}…`);
+    this.host.loadCapture(i, c.path)
+      .then((info) => { this.applySource(i, info, false); this.toast(info.trimmed ? `Loaded the first ${MAX_SECONDS} s of ${c.name}` : `Loaded ${c.name} into layer ${i + 1}`); })
+      .catch((e: Error) => this.toast(e.message));
   }
   isOriginal(i: number): boolean { return this.original[i]; }
   setOriginal(i: number, on: boolean): void {
