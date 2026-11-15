@@ -1,3 +1,281 @@
 \chapter{La STFT como marco de Gabor}\label{cap:stft}
 
-\enproceso{Análisis y síntesis; redundancia $N/H$; ventana dual; COLA y NOLA; la ISTFT como proyección de mínimos cuadrados (Griffin–Lim) y por qué una STFT modificada no es una STFT; consistencia; el principio de incertidumbre aplicado al espectrograma; la malla física $(t_m,f_k)$ de Fourierizer.}
+En el \cref{cap:ventanas} estudiamos un fragmento a la vez. Ahora juntamos todos los fragmentos.
+La transformada de Fourier de tiempo corto convierte una señal en una tabla de coeficientes
+$\chi(m,k)$, uno por cada pareja (ventana, frecuencia). Fourierizer modifica esa tabla (la
+multiplica por una máscara) y la convierte de regreso en sonido. Este capítulo responde tres
+preguntas: ¿cuándo se puede regresar?, ¿cómo se regresa de la mejor manera? y ¿qué pasa cuando
+la tabla ya no corresponde a ningún sonido?
+
+\section{Análisis: la tabla de coeficientes}
+
+Sea $x$ una señal de energía finita, $w$ una ventana de largo $L$ (cero fuera de $[0,L)$), $N\ge L$
+el tamaño de la FFT y $H$ el salto. Fourierizer centra cada fragmento en el instante $mH$:
+\[
+  \chi(m,k)=\sum_{n=0}^{L-1}x\bigl[n+mH-\lfloor L/2\rfloor\bigr]\,w[n]\,\e^{-2\pi\iu kn/N},
+  \qquad k=0,\dots,N-1,
+\]
+con $x[n]=0$ fuera de la señal. El coeficiente $\chi(m,k)$ describe lo que pasa alrededor del
+tiempo $t_m=mH/\Fs$ y la frecuencia $f_k=k\Fs/N$. A los puntos $(t_m,f_k)$ los llamamos la
+\emph{malla} del análisis.
+
+Conviene escribir la ventana del fragmento $m$ ya colocada en su lugar,
+$w_m[n]=w\bigl[n-mH+\lfloor L/2\rfloor\bigr]$, y los \emph{átomos}
+\[
+  g_{m,k}[n]=w_m[n]\,\e^{2\pi\iu k(n-mH+\lfloor L/2\rfloor)/N},
+\]
+de modo que $\chi(m,k)=\langle x,g_{m,k}\rangle=\sum_n x[n]\,\overline{g_{m,k}[n]}$. Cada
+coeficiente mide cuánto se parece la señal a una onda de frecuencia $f_k$ encerrada en la ventana
+$w_m$. A la familia $\{g_{m,k}\}$ se le llama \emph{familia de Gabor}~\cite{grochenig2001}.
+
+\paragraph{Redundancia.} Por cada $H$ muestras nuevas de la señal, el análisis produce $N$
+coeficientes complejos. Si la señal es real, la mitad son conjugados de la otra mitad y quedan
+$N/2+1$ independientes, es decir, cerca de $N$ números reales. La \emph{redundancia} es entonces
+\[
+  \rho=\frac{N}{H}\quad\text{números reales por cada muestra real.}
+\]
+Con los valores por defecto de Fourierizer ($N=4096$, $H=512$), $\rho=8$: la tabla guarda ocho
+veces más números que la señal. Esa redundancia es la que permite seleccionar con suavidad, y
+también la que hace posible que una tabla modificada no corresponda a ningún sonido.
+
+\section{Cuándo se puede regresar: marcos y NOLA}
+
+\begin{proposicion}[Energía de la tabla]\label{prop:energia-stft}
+Sea $S[n]=\sum_{m\in\Z}w_m[n]^2=\sum_{m\in\Z}w\bigl[n-mH+\lfloor L/2\rfloor\bigr]^2$. Entonces
+\[
+  \sum_{m}\sum_{k=0}^{N-1}|\chi(m,k)|^2=N\sum_{n}S[n]\,|x[n]|^2 .
+\]
+\end{proposicion}
+
+\begin{proof}
+Para cada $m$, la sucesión $\chi(m,\cdot)$ es la DFT de tamaño $N$ del fragmento
+$y_m[n]=x[n+mH-\lfloor L/2\rfloor]\,w[n]$, rellenado con ceros de $L$ a $N$. Por Parseval para la
+DFT, $\sum_k|\chi(m,k)|^2=N\sum_n|y_m[n]|^2$. Sumando sobre $m$ y cambiando de variable
+$n\mapsto n-mH+\lfloor L/2\rfloor$,
+\[
+  \sum_m N\sum_n|x[n+mH-\lfloor L/2\rfloor]|^2w[n]^2=N\sum_n|x[n]|^2\sum_m w_m[n]^2 . \qedhere
+\]
+\end{proof}
+
+La función $S$ mide cuánta ventana ``cubre'' a cada muestra. Es periódica de periodo $H$, así que
+basta mirarla en un periodo.
+
+\begin{definicion}
+Una familia $\{g_j\}$ es un \emph{marco} (\emph{frame}) si existen constantes $0<A\le B<\infty$
+tales que, para toda señal $x$ de energía finita,
+\[
+  A\,\|x\|^2\le\sum_j|\langle x,g_j\rangle|^2\le B\,\|x\|^2 .
+\]
+El marco es \emph{ajustado} si se puede tomar $A=B$.
+\end{definicion}
+
+\begin{corolario}[NOLA]\label{cor:nola}
+La familia de Gabor es un marco con $A=N\min_n S[n]$ y $B=N\max_n S[n]$. Por lo tanto el análisis
+es invertible de forma estable si y solo si
+\[
+  \min_{0\le n<H}\ \sum_m w\bigl[n-mH\bigr]^2>0
+  \qquad\text{(\emph{nonzero overlap-add}, NOLA),}
+\]
+y el marco es ajustado si y solo si $S$ es constante.
+\end{corolario}
+
+\begin{proof}
+Es inmediato de la \cref{prop:energia-stft}: $N\min S\,\|x\|^2\le N\sum S|x|^2\le N\max S\,\|x\|^2$,
+y ambas cotas se alcanzan con señales concentradas donde $S$ es mínima o máxima.
+\end{proof}
+
+Si alguna muestra no queda cubierta por ninguna ventana ($S[n]=0$), la tabla no sabe nada de ella
+y no hay forma de recuperarla: eso es lo que prohíbe NOLA. Fourierizer rechaza las mallas que
+violan NOLA (por ejemplo, Hann con $H=L$, cuyas ventanas solo se tocan en ceros).
+
+\begin{estudio}
+\textbf{Qué salto usar.} Cualquier salto que cumpla NOLA permite reconstruir el sonido
+\emph{sin selección}. Pero en cuanto hay máscara, un salto pequeño ayuda dos veces: la selección
+se puede colocar con más precisión en el tiempo, y la reconstrucción promedia más fragmentos, así
+que los cortes se oyen más suaves. Fourierizer usa por defecto un traslape de 88\,\% ($H=N/8$).
+Con 75\,\% ($H=N/4$) es la mitad del cálculo y suele bastar para pads. Para cortes finos sobre
+percusiones conviene 88\,\% o más.
+\end{estudio}
+
+\section{Cómo se regresa: la inversa de mínimos cuadrados}
+
+El operador de análisis $\mathcal A x=\chi$ es lineal. Su adjunto toma una tabla $Y(m,k)$ y la
+convierte en señal:
+\[
+  (\mathcal A^{*}Y)[n]=\sum_{m}\sum_{k}Y(m,k)\,g_{m,k}[n]
+  =N\sum_m w_m[n]\;\tilde y_m\bigl[n-mH+\lfloor L/2\rfloor\bigr],
+\]
+donde $\tilde y_m=\mathrm{IDFT}_N(Y(m,\cdot))$ (la inversa normalizada, con el factor $1/N$). Es
+decir: cada columna se regresa al tiempo, se multiplica otra vez por la ventana y se suma en su
+lugar (\emph{overlap-add}).
+
+\begin{proposicion}[Operador de marco diagonal]\label{prop:diagonal}
+Si $N\ge L$, entonces $\mathcal A^{*}\mathcal A=N\cdot\mathrm{diag}(S)$, es decir,
+$(\mathcal A^{*}\mathcal A x)[n]=N\,S[n]\,x[n]$.
+\end{proposicion}
+
+\begin{proof}
+Si $Y=\mathcal Ax$, la columna $m$ es la DFT del fragmento $y_m$, y como $N\ge L$ la IDFT lo
+devuelve sin traslaparse consigo mismo: $\tilde y_m=y_m$ (rellenado con ceros). Entonces
+\[
+  (\mathcal A^{*}\mathcal Ax)[n]=N\sum_m w_m[n]\,x[n]\,w_m[n]=N\,S[n]\,x[n]. \qedhere
+\]
+\end{proof}
+
+Este es el caso que Daubechies, Grossmann y Meyer llamaron ``expansiones no ortogonales sin
+dolor''~\cite{daubechies1986}: cuando la FFT es al menos tan larga como la ventana, invertir el
+operador de marco es dividir muestra por muestra.
+
+\begin{teorema}[Inversa de mínimos cuadrados]\label{teo:minimos-cuadrados}
+Supongamos NOLA y $N\ge L$. Para cualquier tabla $Y$, la señal
+\begin{equation}\label{eq:istft}
+  \hat x[n]=\frac{\displaystyle\sum_m w_m[n]\;\tilde y_m\bigl[n-mH+\lfloor L/2\rfloor\bigr]}{S[n]}
+\end{equation}
+es la única que minimiza $\|\mathcal Ax-Y\|^2=\sum_{m,k}|\chi_x(m,k)-Y(m,k)|^2$. En particular, si
+$Y=\mathcal Ax$ entonces $\hat x=x$ (reconstrucción perfecta).
+\end{teorema}
+
+\begin{proof}
+$\|\mathcal Ax-Y\|^2$ es una forma cuadrática en $x$ con mínimo en las soluciones de las
+ecuaciones normales $\mathcal A^{*}\mathcal Ax=\mathcal A^{*}Y$. Por la
+\cref{prop:diagonal} y NOLA, $\mathcal A^{*}\mathcal A=N\,\mathrm{diag}(S)$ es invertible, así que la
+solución es única: $\hat x=(N\,\mathrm{diag}(S))^{-1}\mathcal A^{*}Y$, que es \eqref{eq:istft}.
+Si $Y=\mathcal Ax$, la misma cuenta da $\hat x=x$.
+\end{proof}
+
+La fórmula \eqref{eq:istft} es la de Griffin y Lim~\cite{griffinlim1984}, y es exactamente la que
+usa Fourierizer (en Python, TypeScript y C++, verificadas entre sí). Se puede leer como una
+expansión con una \emph{ventana dual}: $\hat x=\sum_{m,k}Y(m,k)\,\gamma_{m,k}$ con
+$\gamma_{m,k}=g_{m,k}/(N\,S)$. Si el marco es ajustado ($S$ constante), la dual es la misma
+ventana escalada, y analizar y sintetizar con la misma ventana es ``natural''. Si no, la división
+entre $S$ corrige el traslape automáticamente: por eso Fourierizer no necesita que la ventana sea
+COLA para reconstruir.
+
+\section{Una STFT modificada no es una STFT}
+
+La redundancia tiene una consecuencia profunda. Las tablas que son STFT de alguna señal, las
+tablas \emph{consistentes}, forman el subespacio $\mathrm{Im}\,\mathcal A$. Por cada muestra de
+señal hay $\rho$ números en la tabla, así que ese subespacio ocupa ``una fracción $1/\rho$'' del
+espacio de tablas. Casi cualquier modificación lo abandona.
+
+\begin{proposicion}[Proyección sobre las tablas consistentes]\label{prop:proyeccion}
+El operador $P=\mathcal A\,(\mathcal A^{*}\mathcal A)^{-1}\mathcal A^{*}$ es la proyección ortogonal
+sobre $\mathrm{Im}\,\mathcal A$, y si $\hat x$ es la inversa \eqref{eq:istft} de $Y$, entonces
+\[
+  \mathcal A\hat x=P\,Y .
+\]
+\end{proposicion}
+
+\begin{proof}
+$P$ es autoadjunto y $P^2=\mathcal A(\mathcal A^{*}\mathcal A)^{-1}(\mathcal A^{*}\mathcal A)(\mathcal A^{*}\mathcal A)^{-1}\mathcal A^{*}=P$,
+así que es una proyección ortogonal. Su imagen está contenida en $\mathrm{Im}\,\mathcal A$ y la
+contiene, porque $P\mathcal Ax=\mathcal Ax$. Finalmente,
+$\mathcal A\hat x=\mathcal A(\mathcal A^{*}\mathcal A)^{-1}\mathcal A^{*}Y=PY$.
+\end{proof}
+
+En Fourierizer, la tabla modificada es $Y=M\odot\chi$: la máscara $M(m,k)\in[0,1]$ (la selección)
+por los coeficientes. Lo que realmente suena tiene coeficientes $P(M\odot\chi)$, no $M\odot\chi$.
+La proyección actúa como un \emph{suavizado} en el plano tiempo-frecuencia: los elementos de su
+matriz son los productos $\langle\gamma_{m',k'},g_{m,k}\rangle$ entre átomos, que solo son
+apreciables cuando las dos ventanas se traslapan (en tiempo, unas $L$ muestras) y cuando las
+frecuencias caen dentro del lóbulo principal (en frecuencia, del orden de $\nu_{\text{lp}}\Fs/L$).
+
+\begin{observacion}
+La diferencia $\|M\odot\chi-P(M\odot\chi)\|$ mide la \emph{inconsistencia} de la selección.
+Es cero si la máscara es constante, y es pequeña si la máscara varía lentamente en comparación con
+el tamaño de ese suavizado. Los bordes duros (una máscara que salta de 0 a 1 entre dos
+coeficientes vecinos) son los que más se alejan de lo consistente: la reconstrucción no puede
+respetarlos y los redondea, a veces con un leve \emph{ringing}.
+\end{observacion}
+
+Como las máscaras de Fourierizer son reales y no negativas, la fase de cada coeficiente se
+conserva. El problema clásico de reconstruir una señal a partir \emph{solo} de magnitudes, para el
+que Griffin y Lim propusieron su célebre iteración $x_{j+1}=\mathcal A^{\dagger}\bigl(|Y|\,\e^{\iu\angle\mathcal Ax_j}\bigr)$,
+no aparece aquí. Volverá a asomarse en el \cref{cap:operaciones}, donde la síntesis cruzada
+combina la magnitud de un sonido con la fase de otro.
+
+\begin{estudio}
+\textbf{Por qué una selección no suena exactamente como se ve.} Lo que dibujas es $M$; lo que oyes
+es su versión ``proyectada''. Tres consecuencias prácticas:
+\begin{itemize}
+  \item \emph{Los bordes siempre son un poco suaves.} En el tiempo, del orden de la duración de la
+        ventana ($85$ ms con $N=4096$ a $48$ kHz). En frecuencia, del orden del lóbulo principal:
+        con Hann y $N=4096$, unos $23\Hz$. Eso es casi \textbf{4 semitonos alrededor de 100 Hz},
+        pero solo $0.4$ semitonos a 1 kHz. Por eso es difícil aislar un armónico grave con
+        ventanas cortas.
+  \item \emph{El feather ayuda.} Un borde suave ya es casi consistente, así que la proyección casi
+        no lo cambia: suena como se dibuja, sin \emph{ringing}. El feather por defecto (un
+        semitono y unos milisegundos) está pensado para eso.
+  \item \emph{Para cortes precisos en graves,} sube $N$ o usa \emph{Resolution: Multi}
+        (\cref{cap:multirresolucion}), que analiza los graves con una ventana cuatro veces más
+        larga.
+\end{itemize}
+\end{estudio}
+
+\section{El principio de incertidumbre en el espectrograma}
+
+El teorema de Heisenberg–Gabor del \cref{cap:ventanas} tiene aquí una lectura directa. Cada
+coeficiente ``ve'' un rectángulo del plano de unos $L/\Fs$ segundos por unos
+$\nu_{\text{lp}}\Fs/L$ hertz, donde $\nu_{\text{lp}}$ es el ancho del lóbulo principal en bins.
+Su área,
+\[
+  \frac{L}{\Fs}\cdot\frac{\nu_{\text{lp}}\Fs}{L}=\nu_{\text{lp}},
+\]
+\textbf{no depende de $L$}: cambiar el largo de la ventana solo cambia la forma del rectángulo,
+no su tamaño. Ese tamaño mínimo lo fija la forma de la ventana, y ninguna ventana baja del límite
+de la gaussiana.
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{rrrr}
+\toprule
+$N=L$ & duración & separación entre bins & ancho a $-6\dB$ (Hann) \\
+\midrule
+1024  & 21.3 ms  & 46.9 Hz & 93.8 Hz \\
+2048  & 42.7 ms  & 23.4 Hz & 46.9 Hz \\
+4096  & 85.3 ms  & 11.7 Hz & 23.4 Hz \\
+8192  & 170.7 ms & 5.9 Hz  & 11.7 Hz \\
+16384 & 341.3 ms & 2.9 Hz  & 5.9 Hz \\
+\bottomrule
+\end{tabular}
+\caption{Resolución en tiempo y en frecuencia a $\Fs=48$ kHz. El ancho a $-6\dB$ de Hann es de
+2 bins. Cada fila duplica la duración y divide entre dos el ancho en frecuencia.}
+\label{tab:resolucion}
+\end{table}
+
+\begin{ejemplo}[Un bombo y su nota]
+Un bombo típico tiene un ataque de unos 5 ms y un cuerpo afinado cerca de 55 Hz. Para ver el
+ataque como un golpe nítido hace falta una ventana de pocos milisegundos ($N\le512$). Para que su
+nota quede separada de la del bajo, digamos a $65\Hz$ (unos 3 semitonos arriba), hace falta un
+ancho menor a $10\Hz$, es decir, $N\ge 16384$ (\cref{tab:resolucion}). Las dos exigencias juntas
+son imposibles con una sola ventana. No es un defecto del programa, es el
+\cref{cap:ventanas} en acción.
+\end{ejemplo}
+
+\section{La malla física de Fourierizer}
+
+Fourierizer nunca guarda una selección en términos de índices $(m,k)$. La guarda en unidades
+físicas: segundos y $\log_2$ de hertz. Al calcular, la \emph{rasteriza} sobre la malla del momento,
+evaluándola en cada punto $(t_m,f_k)$ (\cref{cap:mascaras}). Esto tiene tres consecuencias:
+\begin{itemize}
+  \item Cambiar la ventana, $N$ o $H$ no mueve ni deforma la selección. Solo cambia qué tan fino
+        se ``muestrea''.
+  \item Cada capa puede tener su propia malla, y aun así todas se combinan en el tiempo: cada
+        una se reconstruye con su inversa \eqref{eq:istft} y las señales se suman.
+  \item Rellenar con ceros ($N>L$) agrega puntos a la malla en frecuencia, es decir, dibuja más
+        fino, pero la resolución (el tamaño del rectángulo de la sección anterior) la sigue
+        fijando $L$. En la interfaz de Fourierizer, $N=L$.
+\end{itemize}
+
+\begin{estudio}
+\textbf{Elegir $N$ según el material.} Con la \cref{tab:resolucion} en mente:
+\begin{itemize}
+  \item \emph{Percusiones y ataques:} $N$ de 512 a 1024. Golpes nítidos; las notas se ven anchas.
+  \item \emph{Voces, guitarras, la mayoría de los instrumentos:} 2048 o 4096, el valor por
+        defecto.
+  \item \emph{Pads, graves, acordes densos:} 8192 o 16384. Armónicos separados uno por uno, a
+        cambio de ataques emborronados.
+  \item \emph{Las dos cosas a la vez:} \emph{Resolution: Multi}, que usa una ventana distinta en
+        cada banda (\cref{cap:multirresolucion}).
+\end{itemize}
+\end{estudio}
