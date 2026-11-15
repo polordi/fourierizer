@@ -1,3 +1,148 @@
 \chapter{Operaciones entre espectros}\label{cap:operaciones}
 
-\enproceso{Suma (la de la tesis), síntesis cruzada, vocoder, morph, máximo espectral y resta espectral: definiciones, propiedades y lo que se oye.}
+Hasta ahora cada capa se selecciona y se reconstruye por su cuenta, y los resultados se suman.
+Fourierizer ofrece otras tres maneras de combinar las capas, que operan coeficiente por
+coeficiente: \emph{Max}, \emph{Cross} y \emph{Product}. Son operaciones no lineales, y es ahí donde
+aparecen los sonidos que no se pueden obtener mezclando.
+
+\section{La suma}
+
+En \emph{Sum}, cada capa $i$ se reconstruye en su propia malla y las señales se suman con su
+ganancia $g_i$ y su retraso $\tau_i$:
+\[
+  y[n]=\sum_i g_i\;\mathcal A_i^{\dagger}\bigl(M_i\odot\mathcal A_i x_i\bigr)\bigl[n-\tau_i\Fs\bigr].
+\]
+Como la inversa es lineal, sumar señales equivale a sumar tablas cuando las capas comparten malla:
+$\mathcal A^{\dagger}(Y_1)+\mathcal A^{\dagger}(Y_2)=\mathcal A^{\dagger}(Y_1+Y_2)$. Por eso no hace
+falta una malla común, y cada capa puede tener la ventana que mejor le queda. Es la idea original de
+la tesis~\cite{rodriguez2025}: \textbf{las selecciones suenan juntas, como capas de una mezcla, pero
+recortadas con precisión en tiempo y frecuencia}.
+
+La suma hereda lo bueno y lo malo de mezclar. Si dos selecciones se traslapan sobre contenido
+parecido, sus coeficientes se suman como números complejos: se refuerzan si sus fases coinciden y
+se cancelan si se oponen. Además, la capa más fuerte tapa a la débil en la zona común, el
+\emph{enmascaramiento} del \cref{cap:sonido}.
+
+\section{Una malla común}
+
+Las otras operaciones comparan coeficientes de capas distintas en la \emph{misma} celda $(m,k)$,
+así que todas las capas tienen que analizarse en una sola malla. Fourierizer usa Hann con
+$N=L=4096$ y $H=512$ (traslape de 88\,\%). Cada capa se coloca primero en la línea de tiempo
+común, con su ganancia y su retraso. Se analiza, se multiplica por su máscara (evaluada en
+$t-\tau_i$, para que la selección viaje con la capa) y se obtiene su tabla seleccionada
+$\chi_i=M_i\odot\mathcal Ax_i$. La operación combina esas tablas en una tabla $Y$, y una sola
+inversa da el resultado. Al final, como en la suma, el pico se normaliza a $-0.3$ dBFS.
+
+\section{Max: un collage espectral}
+
+\[
+  Y(m,k)=\chi_{i^*}(m,k),\qquad i^*=\arg\max_i\,|\chi_i(m,k)|,
+\]
+con empates resueltos a favor de la capa de menor número. En cada celda gana la capa más fuerte, con
+su magnitud y su fase.
+
+\begin{proposicion}
+\emph{Max} es conmutativa, asociativa e idempotente (combinar una capa consigo misma la deja
+igual), y $|Y|=\max_i|\chi_i|$. Además, equivale a la suma de las capas con las máscaras binarias
+\[
+  B_i(m,k)=\begin{cases}1,& i=i^*(m,k),\\ 0,&\text{en otro caso,}\end{cases}
+  \qquad Y=\sum_i B_i\odot\chi_i .
+\]
+\end{proposicion}
+
+\begin{proof}
+Las tres propiedades son las del máximo, salvo el desempate, que es fijo y no depende del orden
+en que se combinen las capas. La última igualdad es la definición: en cada celda exactamente un
+$B_i$ vale $1$.
+\end{proof}
+
+La segunda forma explica cómo suena. \emph{Max} es una suma en la que las máscaras las decide el
+propio sonido: el plano se reparte entre las capas según quién es más fuerte en cada punto. No hay
+enmascaramiento mutuo (cada celda es de una sola capa) ni cancelaciones de fase. El resultado es
+más definido que la suma: un \emph{collage} donde cada sonido aparece completo en sus zonas
+fuertes. Pero las máscaras $B_i$ son binarias y pueden saltar de celda en celda, y por el
+\cref{cap:stft} eso no es consistente. Donde dos capas tienen niveles parecidos y se alternan, la
+reconstrucción produce un granulado leve, el \emph{ruido musical} del \cref{cap:mascaras}.
+
+\section{Cross: el cuerpo de uno, el movimiento de otro}
+
+Con dos capas, $A$ y $B$:
+\[
+  Y=|\chi_A|\;\e^{\iu\angle\chi_B},
+\]
+y $Y=0$ donde $B$ es nulo (ahí su fase no está definida). Cada celda toma la magnitud de $A$ y la
+fase de $B$.
+
+¿Qué guarda la fase? El teorema de desplazamiento (\cref{cap:fourier}) dice que retrasar una señal
+$n_0$ muestras multiplica su transformada por $\e^{-\iu\theta n_0}$: \textbf{la posición de los
+eventos en el tiempo está escrita en la fase}, como una pendiente en frecuencia. Dentro de cada
+fragmento, la fase de $B$ dice \emph{dónde} caen sus golpes y transientes, y cómo evolucionan sus
+parciales. La magnitud de $A$ dice \emph{qué} frecuencias suenan y con qué fuerza: su timbre, sus
+armónicos, su envolvente espectral.
+
+La tabla $Y$ casi nunca es consistente: la magnitud de un sonido con la fase de otro no es la STFT de
+ningún sonido. La reconstrucción la proyecta (\cref{prop:proyeccion}), así que el resultado no tiene
+\emph{exactamente} la magnitud de $A$. Tiene la más cercana que se puede sostener con fases parecidas a
+las de $B$. Es la misma situación del célebre algoritmo de Griffin y Lim~\cite{griffinlim1984}, que
+itera esa proyección para reconstruir un sonido a partir de su magnitud. Fourierizer hace una sola
+pasada, y es justo esa tensión entre magnitud y fase la que da el sonido característico de la síntesis
+cruzada.
+
+\begin{estudio}
+\textbf{Usar Cross.} Pon en $A$ lo que debe aportar el color: un pad, un acorde, una voz sostenida.
+Pon en $B$ lo que debe aportar el ritmo y la articulación: un break, una línea de bajo staccato,
+lluvia. El resultado es el acorde de $A$ ``tocado'' con la rítmica de $B$. Si $B$ tiene silencios, el
+resultado también, porque donde $B$ es nulo no hay fase que prestar.
+\end{estudio}
+
+\section{Product: imprimir un sonido sobre otro}
+
+\[
+  Y=|\chi_A|\cdot\chi_B .
+\]
+En cada fragmento, multiplicar el espectro de $B$ por la magnitud de $A$ es \emph{filtrar} $B$ con un
+filtro cuya respuesta en frecuencia es $|\chi_A|$. Multiplicar en frecuencia es convolucionar en el
+tiempo: el fragmento de $B$ se convoluciona con la respuesta al impulso de fase cero de ese filtro.
+El filtro cambia de fragmento en fragmento, siguiendo a $A$. Es la idea del \emph{vocoder}, en el
+que un sonido modulador ($A$, típicamente una voz) imprime su envolvente espectral sobre un portador
+($B$, típicamente un sintetizador o ruido). La diferencia es que aquí $|\chi_A|$ no se suaviza: $B$
+recibe no solo los formantes de $A$, sino \emph{sus armónicos}.
+
+Hay una consecuencia de escala: en decibeles, el nivel de cada celda es la suma de los niveles de
+$A$ y de $B$. Los picos se vuelven mucho más picos y los valles más hondos, y el resultado suele ser
+más resonante y ``afinado'' que cualquiera de las dos fuentes. La normalización final corrige el
+nivel global, no esa forma.
+
+\begin{estudio}
+\textbf{Usar Product.} Con $A$ una voz y $B$ un ruido (lluvia, viento, cinta), la lluvia ``canta''
+las notas y las vocales de la voz. Con $A$ un acorde y $B$ una batería, la batería queda afinada al
+acorde. Como multiplica dos rangos dinámicos, conviene usar selecciones con feather amplio y
+revisar el resultado en la vista de análisis: cualquier resonancia aislada se vuelve muy
+evidente.
+\end{estudio}
+
+\section{Lo que no entró}
+
+Se probaron otras dos operaciones en el demo web, y se descartaron después de escucharlas:
+\begin{itemize}
+  \item \textbf{Resta espectral}, $\max(|\chi_A|-\beta|\chi_B|,0)\,\e^{\iu\angle\chi_A}$: ``quitarle $B$
+        a $A$''. Produce mucho ruido musical, porque la resta deja islas aleatorias de energía en las
+        zonas donde las dos magnitudes se parecen.
+  \item \textbf{Morph}, una interpolación de magnitudes entre $A$ y $B$ a lo largo del tiempo. Para
+        que suene como una transformación y no como un crossfade, hay que interpolar envolventes y
+        estructuras armónicas, no coeficientes. Queda como trabajo futuro.
+\end{itemize}
+
+\begin{estudio}
+\textbf{Qué operación elegir.}
+\begin{itemize}
+  \item \emph{Sum:} construir un sonido por partes. Es la más predecible y la única que acepta
+        mallas distintas por capa y multirresolución.
+  \item \emph{Max:} collages entre sonidos completos, con cada uno nítido en sus zonas fuertes.
+  \item \emph{Cross:} color de uno con ritmo de otro.
+  \item \emph{Product:} imprimir los armónicos de uno sobre la textura de otro.
+\end{itemize}
+Las tres últimas son no lineales: el resultado depende mucho de los niveles. Mover el nivel de una
+capa en el mezclador cambia qué capa gana en \emph{Max} y cuánto pesa cada fuente en \emph{Cross} y
+\emph{Product}.
+\end{estudio}
