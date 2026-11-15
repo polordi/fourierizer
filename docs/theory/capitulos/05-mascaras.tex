@@ -1,3 +1,230 @@
 \chapter{Máscaras tiempo-frecuencia}\label{cap:mascaras}
 
-\enproceso{Selecciones como máscaras $M(m,k)\in[0,1]$; máscaras binarias contra suaves; artefactos (\emph{musical noise}, ringing, pre-eco) explicados con la proyección del capítulo~4; el feather como rampa de coseno sobre la distancia con signo; geometría en el plano $(t,\log_2 f)$; selecciones independientes de la resolución.}
+Seleccionar en Fourierizer es construir una función $M(t,f)\in[0,1]$ que dice qué tanto de cada
+punto del plano se conserva: $1$ es todo, $0$ es nada y los valores intermedios atenúan. La capa se
+resintetiza a partir de la tabla modificada $M\odot\chi$, con la inversa del \cref{cap:stft}:
+\[
+  y=\mathcal A^{\dagger}\bigl(M\odot\chi\bigr),\qquad (M\odot\chi)(m,k)=M(t_m,f_k)\,\chi(m,k).
+\]
+Este capítulo describe cómo se construye $M$ a partir de lo que dibujas: rectángulos, lazos,
+peines armónicos y la varita. Todo está pensado para dos cosas: que la selección no dependa de la
+malla y que suene limpia.
+
+\section{El plano de trabajo: tiempo y octavas}
+
+Las selecciones se definen en el plano $(t,\varphi)$ con $\varphi=\log_2 f$. Una distancia vertical
+fija en este plano es un intervalo musical fijo: subir $\varphi$ en $1$ es subir una octava, y
+$1/12$ es un semitono. La razón es perceptiva (\cref{cap:sonido}): oímos las alturas por cocientes,
+no por diferencias, así que un borde ``suave de un semitono'' significa lo mismo en los graves que
+en los agudos. El bin de frecuencia cero, que en esta escala estaría en $-\infty$, se coloca en
+$\varphi=\log_2 1=0$.
+
+Una máscara se \emph{rasteriza} evaluándola en los puntos de la malla, $M(m,k)=M(t_m,\log_2 f_k)$.
+Como la figura vive en el plano y no en la tabla, la misma selección sirve para cualquier ventana,
+tamaño de FFT o salto.
+
+\section{Cada figura es una distancia}
+
+Cada figura $s$ se describe por su \emph{distancia con signo} $d_s(t,\varphi)$ a su borde:
+positiva adentro, negativa afuera, cero en el borde. Las distancias se miden en un plano
+\emph{escalado} por los dos \emph{feathers} de la figura: $\tau$ en segundos y $\psi$ en octavas,
+\[
+  (t,\varphi)\ \longmapsto\ \bigl(t/\tau,\ \varphi/\psi\bigr).
+\]
+Así, una unidad de distancia es ``un feather'': $\tau$ segundos en horizontal o $\psi$ octavas en
+vertical. La máscara de la figura es
+\[
+  M_s=a_s\,\rho(d_s)\,E_s,\qquad
+  \rho(d)=\begin{cases}0,&d\le-\tfrac12,\\[2pt]\tfrac12+\tfrac12\sin(\pi d),&|d|<\tfrac12,\\[2pt]1,&d\ge\tfrac12,\end{cases}
+\]
+donde $a_s\in[0,1]$ es la ganancia de la figura y $E_s$ son sus fades de tiempo
+(\cref{sec:fades}).
+
+\paragraph{Rectángulo.} Para $[t_0,t_1]\times[\varphi_0,\varphi_1]$ sean
+$d_t=\min(t-t_0,\,t_1-t)/\tau$ y $d_\varphi=\min(\varphi-\varphi_0,\,\varphi_1-\varphi)/\psi$. Entonces
+\[
+  d=\begin{cases}\min(d_t,d_\varphi), & d_t\ge0\ \text{y}\ d_\varphi\ge0,\\[2pt]
+  -\sqrt{\min(d_t,0)^2+\min(d_\varphi,0)^2}, & \text{en otro caso.}\end{cases}
+\]
+
+\begin{proposicion}
+Esta fórmula es la distancia euclidiana con signo al rectángulo en el plano escalado.
+\end{proposicion}
+
+\begin{proof}
+Adentro, el punto más cercano del borde está sobre el lado más cercano, a distancia
+$\min(d_t,d_\varphi)$. Afuera hay dos casos. Si el punto está frente a un lado (una sola de
+$d_t,d_\varphi$ es negativa), la distancia es la de ese lado, $|\min(\cdot,0)|$. Si está frente a una
+esquina (ambas negativas), el punto más cercano es la esquina, y por Pitágoras la distancia es
+$\sqrt{d_t^2+d_\varphi^2}$. Las dos situaciones son la expresión con $\min(\cdot,0)$.
+\end{proof}
+
+\paragraph{Lazo.} Un polígono con vértices $(t_i,\varphi_i)$ usa la distancia mínima a sus segmentos,
+calculada en el plano escalado. El signo lo da la \emph{regla par-impar}: un rayo horizontal desde
+el punto cruza el contorno un número impar de veces si y solo si el punto está adentro. La regla
+funciona igual para lazos cóncavos o que se cruzan a sí mismos.
+
+\section{El borde suave}
+
+\begin{proposicion}[Propiedades de la rampa]\label{prop:rampa}
+La rampa $\rho$ es no decreciente, de clase $C^1$, vale $\tfrac12$ en el borde y es
+\emph{complementaria}: $\rho(d)+\rho(-d)=1$ para todo $d$.
+\end{proposicion}
+
+\begin{proof}
+En $|d|<\tfrac12$, $\rho'(d)=\tfrac\pi2\cos(\pi d)\ge0$, y en $d=\pm\tfrac12$ esa derivada vale $0$,
+igual que la de los tramos constantes: $\rho$ y $\rho'$ son continuas. La complementariedad es
+$\tfrac12+\tfrac12\sin(\pi d)+\tfrac12+\tfrac12\sin(-\pi d)=1$, y en los tramos constantes es
+$1+0$.
+\end{proof}
+
+La complementariedad tiene una consecuencia muy útil: \textbf{dos figuras que comparten un borde,
+con el mismo feather, se reparten la transición sin huecos ni picos}. En cada punto de la franja
+común, una aporta $\rho(d)$ y la otra $\rho(-d)$, y suman $1$. Es un \emph{crossfade} espacial: se
+puede partir un sonido en regiones y repartirlas entre capas sin que se oiga la costura. Que la
+rampa sea $C^1$, y no solo continua, evita el escalón en la pendiente que una rampa lineal tendría
+en sus extremos: el borde de la selección no ``chasquea'' en la reconstrucción.
+
+\section{Combinar figuras}
+
+Las figuras se aplican en orden, como capas en un editor de imágenes, empezando con $M=0$:
+\[
+  \text{sumar:}\quad M\leftarrow M+(1-M)\,M_s,\qquad\qquad
+  \text{restar:}\quad M\leftarrow M\,(1-M_s).
+\]
+
+\begin{proposicion}\label{prop:union}
+Ambas operaciones mantienen $M\in[0,1]$. Si solo hay figuras que suman, el resultado no depende
+del orden:
+\[
+  1-M=\prod_s\bigl(1-M_s\bigr).
+\]
+\end{proposicion}
+
+\begin{proof}
+Si $M,M_s\in[0,1]$, entonces $M+(1-M)M_s$ es un promedio ponderado de $M$ y $1$, y $M(1-M_s)$ es
+un producto de números en $[0,1]$. Para el orden, sumar una figura transforma $1-M$ en
+$(1-M)-(1-M)M_s=(1-M)(1-M_s)$, así que después de todas las sumas $1-M$ es el producto de los
+factores $(1-M_s)$, que conmuta.
+\end{proof}
+
+La suma es una ``unión suave'': donde las figuras no se tocan es su unión, y donde se traslapan
+no se pasa de $1$. Si $M_s$ fuera la probabilidad de que un punto pertenezca a la figura $s$,
+sería la probabilidad de pertenecer a alguna. La resta es una ``diferencia suave''. Una figura
+que resta solo afecta a lo que ya estaba seleccionado, y lo que se suma después ya no se ve
+afectado: \textbf{el orden importa} entre sumas y restas, igual que con la goma de borrar.
+
+\begin{estudio}
+\textbf{Construir una selección.} Empieza con figuras grandes que suman y talla con \emph{Erase}
+(o con Alt) lo que sobre. Para hacer un hueco que no se llene, la resta tiene que ir después de
+las figuras que cubren esa zona. Para repartir un sonido entre dos capas sin costura, usa figuras
+que compartan el borde con el mismo feather.
+\end{estudio}
+
+\section{Fades de tiempo}\label{sec:fades}
+
+El feather suaviza el borde de una figura. Los \emph{fades} hacen otra cosa: dan forma al sonido
+\emph{dentro} de la selección, como una envolvente. En cada renglón de frecuencia $\varphi$, una
+figura cubre uno o varios intervalos de tiempo $[a_j,b_j]$: uno solo en un rectángulo, y los que
+corten el contorno en un lazo. La envolvente es
+\[
+  E(t,\varphi)=\max_j\ S\!\Bigl(\frac{t-a_j}{T_{\text{in}}}\Bigr)\,S\!\Bigl(\frac{b_j-t}{T_{\text{out}}}\Bigr),
+  \qquad S(u)=\begin{cases}0,&u\le0,\\ \tfrac12-\tfrac12\cos(\pi u),&0<u<1,\\ 1,&u\ge1,\end{cases}
+\]
+con la convención de que un fade de duración cero aporta un factor $1$. Cada renglón entra con un
+coseno alzado de $T_{\text{in}}$ segundos desde \emph{su propio} borde izquierdo y sale en
+$T_{\text{out}}$ antes de su borde derecho. En un lazo inclinado, los fades siguen la inclinación:
+un barrido que sube en frecuencia también entra gradualmente a lo largo de su diagonal.
+
+En los renglones que quedan fuera del rango de frecuencias del lazo se usan los intervalos del
+renglón cubierto más cercano. Así, la envolvente sigue siendo continua a través del feather de
+arriba y de abajo.
+
+\begin{estudio}
+\textbf{Feather contra fade.} El feather es corto (milisegundos) y sirve para que un corte no
+chasquee. El fade es largo (de cientos de milisegundos a segundos) y es una decisión musical: que
+una textura aparezca poco a poco, o que una cola desaparezca en vez de cortarse. Para quitar el
+ataque de un sonido y quedarte con su cuerpo, usa un rectángulo con \emph{Fade in} de unos
+$50$--$100$ ms.
+\end{estudio}
+
+\section{El peine armónico}
+
+Un sonido con altura definida tiene sus parciales cerca de los múltiplos de su fundamental,
+$f_0,2f_0,3f_0,\dots$ (\cref{cap:sonido}). El \emph{peine} de Fourierizer selecciona, durante
+$[t_0,t_1]$, franjas de ancho $w$ (en octavas) centradas en los armónicos $k f_0$ con $k$ en un
+conjunto $K$: los primeros armónicos, solo los impares o solo los pares, hasta $24$ kHz. Su
+distancia en frecuencia es la de la franja más cercana,
+\[
+  d_\varphi=\frac{1}{\psi}\Bigl(\frac w2-\min_{k\in K}\bigl|\varphi-\log_2(kf_0)\bigr|\Bigr),
+\]
+y se combina con la distancia en tiempo exactamente como en el rectángulo. Así, el feather y los
+fades se comportan igual que en cualquier otra figura.
+
+En escala logarítmica, los armónicos se van juntando: entre $k f_0$ y $(k+1)f_0$ hay
+$\log_2\frac{k+1}{k}$ octavas, que tiende a cero.
+
+\begin{proposicion}
+Las franjas de los armónicos $k$ y $k+1$ se tocan si y solo si
+\[
+  k\ \ge\ \frac{1}{2^{w}-1}.
+\]
+A partir de ahí, el peine ya no separa armónicos: selecciona una banda continua.
+\end{proposicion}
+
+\begin{proof}
+Cada franja se extiende $w/2$ a cada lado de su centro, así que dos franjas vecinas se tocan cuando
+la separación de sus centros es a lo más $w$: $\log_2\frac{k+1}{k}\le w$, es decir,
+$1+\frac1k\le 2^w$, que equivale a la desigualdad del enunciado.
+\end{proof}
+
+Con un ancho de 100 cents ($w=1/12$), las franjas se juntan desde el armónico 17. Con 50 cents,
+desde el 35, y con 200 cents, desde el 9. Esto coincide con lo que se oye: los armónicos altos de
+una nota grave están más cerca entre sí que un semitono, y un oído (o una selección) ya no los
+separa.
+
+\begin{estudio}
+\textbf{Usar el peine.}
+\begin{itemize}
+  \item \emph{Aislar una nota en una mezcla:} un peine sobre su fundamental con 50--100 cents de
+        ancho toma la nota y deja casi todo lo demás. Funciona mejor con ventanas largas
+        (\cref{cap:stft}).
+  \item \emph{Odd} deja solo los armónicos impares. El timbre se vuelve hueco y nasal, como un
+        clarinete o una onda cuadrada. \emph{Even} deja solo los pares: suena una octava arriba y
+        más brillante.
+  \item Si la nota tiene vibrato o glissando, la fundamental se mueve y un peine fijo la pierde por
+        momentos. Sube el ancho, o usa varios peines cortos.
+\end{itemize}
+\end{estudio}
+
+\section{La varita}
+
+La varita no se define por una fórmula sino por el propio sonido. Al dar clic en un punto del
+espectrograma, se seleccionan los píxeles \emph{conectados} a ese punto cuyo nivel está a menos de
+una tolerancia $\delta$ (en dB) por debajo del nivel del punto. El borde de esa región se traza a lo
+largo de las aristas de los píxeles y se simplifica con el algoritmo de Ramer–Douglas–Peucker
+hasta un máximo de 120 vértices. El resultado es un lazo ordinario, de modo que todo lo anterior
+(distancia, feather, fades) se le aplica sin cambios.
+
+La varita depende de la imagen que ves: de la ventana y del rango de la vista. El lazo que produce,
+en cambio, vive en el plano $(t,\varphi)$ como cualquier otro, y no cambia si después modificas la
+malla.
+
+\section{Artefactos y cómo evitarlos}
+
+Una máscara modifica la tabla, y la reconstrucción proyecta el resultado sobre las tablas
+consistentes (\cref{prop:proyeccion}). De ahí salen los tres artefactos clásicos del filtrado
+tiempo-frecuencia:
+\begin{itemize}
+  \item \textbf{Ringing.} Un borde duro no es consistente. La proyección lo redondea y puede dejar
+        oscilaciones cerca del borde, sobre todo en frecuencia: tonos que ``suenan'' un poco fuera
+        de la selección. \emph{Remedio:} feather.
+  \item \textbf{Ruido musical.} Una máscara que salta entre $0$ y $1$ de coeficiente en coeficiente
+        (por ejemplo, una varita sobre ruido, con tolerancia baja) deja islas sueltas de energía.
+        Cada isla suena como un tono breve y aleatorio. \emph{Remedio:} figuras más grandes y
+        lisas, o más tolerancia.
+  \item \textbf{Pre-eco.} Una selección que empieza justo en un ataque deja pasar la parte de las
+        ventanas que lo contienen y que empieza antes, del orden de $L/2$. El golpe aparece un poco
+        antes, y suavizado. \emph{Remedio:} ventanas cortas en percusiones, o multirresolución
+        (\cref{cap:multirresolucion}).
+\end{itemize}
