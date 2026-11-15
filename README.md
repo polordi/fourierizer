@@ -39,6 +39,13 @@ v1/        Thesis version (notebook)
 
 See [`docs/plan/PLAN.md`](docs/plan/PLAN.md) for the full plan (in Spanish).
 
+## License
+
+Fourierizer is free software: you can redistribute it and/or modify it under the terms of the
+**GNU Affero General Public License v3** as published by the Free Software Foundation (see
+[LICENSE](LICENSE)). It is built with JUCE 8, which is available under the same license, and
+with the other components listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Author
 
 Leopoldo Rodríguez Díaz Infante

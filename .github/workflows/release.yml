@@ -1,0 +1,110 @@
+# Installers: Windows (Inno Setup .exe) and macOS (.pkg), each with Fourierizer (VST3),
+# Fourierizer Capture (VST3) and the Standalone app.
+#   - Run by hand (Actions > release > Run workflow): the installers are attached to the run.
+#   - Push a tag like v2.0.0: also creates a DRAFT GitHub release with both installers, to review
+#     and publish by hand.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    paths: ["installer/**", ".github/workflows/release.yml"]   # test the installers when they change
+  workflow_dispatch:
+
+jobs:
+  installer:
+    name: ${{ matrix.name }} installer
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC developer environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: WebView2 SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Register-PackageSource -ProviderName NuGet -Name nugetRepository -Location https://www.nuget.org/api/v2 -Force -ErrorAction SilentlyContinue | Out-Null
+          Install-Package Microsoft.Web.WebView2 -Scope CurrentUser -RequiredVersion 1.0.1901.177 -Source nugetRepository -Force | Out-Null
+
+      - name: Ninja
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Node (the plugin embeds the web UI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Build
+        shell: bash
+        run: |
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DFZ_CORE_TESTS=OFF
+          cmake --build build/release --parallel --target Fourierizer_VST3 Fourierizer_Standalone FourierizerCapture_VST3
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          v=$(sed -n 's/^ *VERSION *\([0-9.]*\)$/\1/p' plugin/CMakeLists.txt | head -1)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Fourierizer $v"
+
+      - name: Windows installer (Inno Setup)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DBuildDir=..\..\build\release" installer\windows\Fourierizer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - name: macOS installer (pkg)
+        if: runner.os == 'macOS'
+        run: bash installer/macos/build-pkg.sh "${{ steps.version.outputs.version }}" build/release
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ runner.os }}
+          path: build/installer/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --draft \
+            --title "Fourierizer ${GITHUB_REF_NAME#v}" \
+            --notes "Fourierizer ${GITHUB_REF_NAME#v}: the instrument (VST3), Fourierizer Capture (VST3) and the app, for Windows and macOS. See the manual in docs/manual."
