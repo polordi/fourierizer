@@ -87,3 +87,22 @@ Se eligen las 4–5 que mejor suenen una vez hechas.
 2. **La pieza final.** O la produces tú con los sonidos que te exporto de cada transformación (es lo que más te representa), o la arreglo yo a partir de esos sonidos, con secuencias renderizadas por el motor del plugin, y tú la apruebas.
 3. **El gancho:** 1, 2, 3 u otro.
 4. **El enlace del final.**
+
+## Primer corte (2026-11-16)
+
+Los dos borradores están en `D:\Samples Polo\Fourierizer\Video drafts`. Las escenas se graban con `build/tools/video` (fuera del repo): `scene-t1.cjs`, `scenes.cjs`, `cards.cjs` y `story.cjs`; `assemble.cjs` las une.
+
+**Trailer** (3:01, 1920 × 1080, 60 fps):
+
+1. Frase 2 en negro, sobre la lluvia afinada.
+2. Logotipo.
+3. Cuatro sonidos caen en las capas: *Every sound is an image of time and frequency.*
+4. T1 lluvia en La menor y T2 pad hueco (armónicos impares).
+5. Frase 1.
+6. T3 *Cross* (piano × break), T4 *Product* (voz × lluvia), T5 ataque de platillo + cola de campana, T6 *Max* (break × olas).
+7. El pad hueco tocado en acordes: *Every result is an instrument.*
+8. Frase 3 y cierre con el logotipo.
+
+**Story** (0:34, 1080 × 1920): frase 1 → T1 → T3 → acordes → frase 3 y logotipo. La app conserva su diseño horizontal dentro de una ventana; arriba va el nombre y abajo los subtítulos grandes.
+
+Todo el audio es del motor: los ▶ de la app y, para los acordes, la salida real de la app.
