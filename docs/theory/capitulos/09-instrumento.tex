@@ -1,3 +1,126 @@
 \chapter{Del sonido al instrumento}\label{cap:instrumento}
 
-\enproceso{Sampler, keytracking, mipmaps y aliasing al transponer, envolventes ADSR, polifonía; las restricciones del tiempo real (bloque, deadline, latencia) y por qué el render de Fourierizer ocurre fuera del hilo de audio.}
+El resultado de Fourierizer es un sonido. Para tocarlo hace falta un \emph{sampler}: un programa que,
+cada vez que se presiona una tecla, reproduce ese sonido transpuesto a la nota correcta, con una
+envolvente, y que puede hacerlo con muchas notas a la vez. Este capítulo describe el sampler de
+Fourierizer y las reglas del \emph{tiempo real} que lo condicionan.
+
+\section{Afinación: de la tecla a la transposición}
+
+Una tecla MIDI $n$ corresponde a la frecuencia $440\cdot2^{(n-69)/12}\Hz$. El resultado suena tal
+cual en la nota \emph{Root} $n_0$. Tocar la nota $n$ pide transponerlo
+\[
+  s=n-n_0\ \text{semitonos},\qquad r=2^{s/12}.
+\]
+Con \emph{Tape}, cada voz lee el resultado con paso $r\cdot\Fs^{\text{buf}}/\Fs^{\text{host}}$, que
+también convierte la frecuencia de muestreo del resultado ($48$ kHz) a la del programa anfitrión.
+Con \emph{Spectral}, cada voz lee a paso $\Fs^{\text{buf}}/\Fs^{\text{host}}$ una copia del resultado
+ya transpuesta $s$ semitonos (\cref{cap:transformaciones}).
+
+\paragraph{Interpolación.} Leer en posiciones no enteras exige interpolar. En tiempo real, el
+sampler usa la interpolación cúbica de Hermite con cuatro muestras: continua, con derivada
+continua y barata. A diferencia del remuestreador sinc del \cref{cap:transformaciones}, \emph{no}
+filtra antes de acelerar. Al transponer hacia arriba ($r>1$), el contenido por encima de
+$\Fs/(2r)$ se refleja por debajo de Nyquist (aliasing). En sonidos oscuros no se nota; en sonidos
+brillantes transpuestos más de una octava, sí. La solución clásica son las \emph{mipmaps}: copias
+prefiltradas del sonido por octava, entre las que se elige según la nota. Quedan como mejora
+pendiente.
+
+\section{La envolvente}
+
+Cada voz multiplica su sonido por una envolvente $e(t)\in[0,1]$ de cuatro etapas (ADSR):
+\[
+  e(t)=\begin{cases}
+    t/T_a, & 0\le t<T_a \quad\text{(ataque lineal)},\\[2pt]
+    s+(1-s)\,\e^{-(t-T_a)/\tau}, & t\ge T_a,\ \tau=T_d/3 \quad\text{(decaimiento exponencial)},
+  \end{cases}
+\]
+y al soltar la tecla, en el instante $t_r$, baja linealmente desde el nivel que tenía, $e(t_r)$, hasta
+$0$ en $T_r$ segundos (el \emph{release}). El decaimiento es exponencial porque así decaen los
+sistemas físicos (una cuerda, una membrana): pierden una fracción fija de energía por unidad de
+tiempo, y el oído lo percibe como una caída ``pareja'' en decibeles. La constante $\tau=T_d/3$ hace
+que en $T_d$ segundos la distancia al sostenido baje a $\e^{-3}\approx5\,\%$: el decaimiento
+``llega'' al sostenido en el tiempo que marca la perilla.
+
+Las perillas no son lineales. El ataque, por ejemplo, es $T_a=0.001+1.999\,v^2$ segundos para la
+posición $v\in[0,1]$. La mitad de su recorrido cubre de $1$ a $500$ ms, la zona donde el oído
+distingue más diferencias, y la otra mitad llega hasta $2$ s.
+
+\begin{estudio}
+\textbf{Envolventes típicas.}
+\begin{itemize}
+  \item \emph{Pads y texturas:} ataque largo (300 ms o más), sostenido alto, release largo. El sonido
+        aparece y desaparece sin cortes.
+  \item \emph{Plucks y percusivos:} ataque mínimo, decaimiento corto y sostenido en cero. El sonido
+        dura lo que su decaimiento, sin importar cuánto se mantenga la tecla.
+  \item Si un sonido Fourierizado ya trae su propia forma (por ejemplo, fades en la selección),
+        usa ataque y release cortos para no tapar la que ya tiene.
+\end{itemize}
+\end{estudio}
+
+\section{Polifonía}
+
+El sampler tiene 24 voces. Cada nota ocupa una voz libre. Si no hay ninguna, se \emph{roba} la más
+antigua: es la que lleva más tiempo sonando y suele ser la menos audible. El pedal de sostenido
+(CC64) mantiene las notas soltadas hasta que se levanta. Las notas de la interfaz (el teclado de la
+computadora) y las del programa anfitrión (MIDI) entran por caminos distintos, pero llegan a las
+mismas voces.
+
+\section{Las reglas del tiempo real}
+
+El anfitrión pide audio en bloques de $B$ muestras: típicamente $B=256$ o $512$, es decir, $5.3$ o
+$10.7$ ms a $48$ kHz. Cada bloque tiene que estar listo \emph{antes} de que se acabe el anterior. Si
+no, la tarjeta de sonido se queda sin datos y se oye un chasquido. No basta con que el cálculo sea
+rápido \emph{en promedio}: tiene que ser rápido \emph{siempre}. Por eso el hilo de audio sigue tres
+reglas:
+\begin{enumerate}
+  \item \textbf{No pide ni libera memoria.} El administrador de memoria del sistema puede tardar un
+        tiempo impredecible.
+  \item \textbf{No espera a otros hilos.} Si toma un candado que otro hilo tiene, queda a merced de
+        ese hilo, que puede tener menos prioridad (la \emph{inversión de prioridad}).
+  \item \textbf{No lee ni escribe archivos,} por la misma razón.
+\end{enumerate}
+
+Las consecuencias en el diseño:
+\begin{itemize}
+  \item \emph{Un resultado nuevo} llega por un intercambio de punteros protegido con un candado que
+        el hilo de audio solo \emph{intenta} tomar. Si está ocupado, lo toma en el bloque
+        siguiente.
+  \item \emph{Los buffers viejos} nunca se liberan en el hilo de audio. Un ``depósito de
+        liberación'' conserva una referencia a cada buffer, y otro hilo lo libera cuando nadie más lo
+        usa.
+  \item \emph{Las notas de la interfaz} llegan por una cola circular sin candados.
+\end{itemize}
+
+\section{El banco de copias de Spectral}
+
+Un phase vocoder de calidad es demasiado caro para correr por nota en el hilo de audio. Como el
+resultado es fijo, Fourierizer calcula las copias transpuestas \emph{antes}: una por semitono, en dos
+hilos de fondo. Primero van las notas que tocas y después la octava alrededor del Root. Hay un
+presupuesto de memoria de 1 GB, y si se llena se descarta la copia menos usada recientemente.
+
+Cada copia se produce por pedazos: un primer pedazo de 4096 muestras y luego de 16384. Una voz
+puede empezar a tocar una copia que todavía se está calculando: solo tiene que no rebasar la
+última muestra lista. Como el cálculo corre entre 8 y 40 veces más rápido que el tiempo real, la
+reproducción nunca alcanza al cálculo. Una nota nueva espera, cuando mucho, su primer pedazo:
+alrededor de un bloque.
+
+Al \emph{exportar} (render fuera de línea), el anfitrión pide bloques más rápido que el tiempo real
+y no importa esperar. En ese modo, la voz sí espera a que su copia esté lista, y el archivo
+exportado sale exacto, sin depender de qué tan rápida sea la computadora.
+
+\section{Estado y parámetros}
+
+Todo lo que define el instrumento se guarda en el proyecto del anfitrión: los sonidos (en FLAC
+24-bit, cada audio distinto una sola vez), las selecciones, las tomas y la petición del último
+render. Al abrir el proyecto, el plugin vuelve a calcular el resultado en segundo plano, así que
+suena aunque nadie abra su ventana. Los controles del sampler (ADSR, Root, volumen, Tape o Spectral
+y la ventana de Spectral) son \emph{parámetros del anfitrión}: se pueden automatizar y ligar a un
+controlador MIDI.
+
+\begin{estudio}
+\textbf{Elegir el Root.} Es la nota en la que el resultado suena intacto. Conviene que sea la nota real
+del sonido, si la tiene (la vista de análisis del resultado la muestra), y que quede en el centro del
+rango que vas a tocar. Así las transposiciones son pequeñas en ambas direcciones, que es donde Tape
+y Spectral suenan mejor.
+\end{estudio}
