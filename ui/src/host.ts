@@ -117,7 +117,12 @@ export class BrowserHost implements Host {
     };
     this.sampler.onActivity = () => this.onPlay?.();
     this.sampler.shifted = (shift) => this.shiftedBuffer(shift);
+    // ?capture (the release videos): expose the exact audio the app produced, so the video's
+    // soundtrack is what the screen shows. Nothing changes without the flag.
+    if (typeof location !== "undefined" && new URLSearchParams(location.search).has("capture"))
+      (globalThis as unknown as { __fzCapture: unknown }).__fzCapture = { result: () => this.result, preview: () => this.lastPreview };
   }
+  private lastPreview: { selection: Float32Array[]; original: Float32Array[] | null; gain: number } | null = null;
 
   private call<T>(msg: WorkerRequest, transfer: Transferable[] = []): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -252,6 +257,7 @@ export class BrowserHost implements Host {
     this.sampler.stopPreview();
     const r = await this.call<{ channels: Float32Array[]; peak: number; original: Float32Array[]; peakOriginal: number }>({ type: "layer", req: this.next++, sr: SR, job });
     const peak = Math.max(r.peak, r.peakOriginal);   // one gain for both, so A/B compares fairly
+    this.lastPreview = { selection: r.channels, original: r.original, gain: peak > 0.977 ? 0.977 / peak : 1 };
     if (peak > 0) this.sampler.playPreview(i, r.channels, r.original, SR, peak > 0.977 ? 0.977 / peak : 1, original);
     return { peak: original ? r.peakOriginal : r.peak };
   }

@@ -440,7 +440,7 @@ Ready: ${ready} of ${total} notes around the root` : HELP.spectral;
     const toolSeg = new Segmented(null, ([
       ["rect", "Rect", ICONS.rect, "Drag a rectangle to select (Alt subtracts). Click a selection to move, resize, fade or delete it"],
       ["lasso", "Lasso", ICONS.lasso, "Draw a free shape to select (Alt subtracts). Click a selection to move, scale, fade or delete it"],
-      ["harm", "Harmonics", ICONS.harm, "Select a note with all its harmonics: drag along the fundamental for its time span, or click for the whole sound. Then choose how many, how wide, all / odd / even"],
+      ["harm", "Harmonics", ICONS.harm, "Select a note with all its harmonics: drag along the fundamental for its time span, or click for the whole sound (it snaps to the loudest partial nearby; hold Shift to place it exactly). Then choose how many, how wide, all / odd / even"],
       ["wand", "Wand", ICONS.wand, "Magic wand: click on something you can see (a note, a hit, a tail) to select the area around it; adjust its range afterwards"],
       ["erase", "Erase", ICONS.erase, "Drag a rectangle to remove from the selection"],
       ["move", "Move", ICONS.move, "Only pick and move selections, never draw. Delete removes the picked one"],

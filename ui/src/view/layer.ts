@@ -800,7 +800,7 @@ export class LayerView {
    *  - drag on the picked shape moves it (with the Move tool, any shape). */
   private wirePointer(): void {
     let act: "none" | "draw" | "move" = "none", start: [number, number] = [0, 0], last: [number, number] = [0, 0];
-    let lasso: [number, number][] = [], subtract = false, target = -1, dragged = false, snapped = false;
+    let lasso: [number, number][] = [], subtract = false, free = false, target = -1, dragged = false, snapped = false;
     const n = this.i + 1;
     this.svg.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
@@ -820,6 +820,7 @@ export class LayerView {
       } else {
         act = "draw";
         subtract = tool === "erase" || e.altKey;
+        free = e.shiftKey;   // harmonic comb: exactly where clicked, no snapping
         lasso = tool === "lasso" ? [p] : [];
       }
     });
@@ -867,7 +868,7 @@ export class LayerView {
         let sh: Shape | null = null;
         if (tool === "harm") {
           const a = dragged ? this.tOf(Math.min(start[0], p[0])) : 0, b = dragged ? this.tOf(Math.max(start[0], p[0])) : dur;
-          sh = { kind: "harm", mode, t: [a, b], f0: this.snapF0(start[1], a, b), count: 16, width: 1 / 12, parity: "all" };
+          sh = { kind: "harm", mode, t: [a, b], f0: free ? yToFreq(start[1]) : this.snapF0(start[1], a, b), count: 16, width: 1 / 12, parity: "all" };
         } else {
           const t = this.tOf(start[0]), f = yToFreq(start[1]), pts = this.wandPoints(t, f, 15);
           if (pts.length >= 3) sh = { kind: "poly", mode, points: pts, seed: { t, f, tol: 15 } };

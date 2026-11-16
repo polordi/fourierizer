@@ -88,7 +88,7 @@ Viene en tres piezas:
 |---|---|
 | **Rect** | Arrastra un rectángulo. Con **Alt**, resta en lugar de sumar. |
 | **Lasso** | Dibuja una forma libre. |
-| **Harmonics** | Arrastra a lo largo del fundamental de una nota, o da clic para todo el sonido. Se selecciona la nota con todos sus armónicos (un "peine"). |
+| **Harmonics** | Arrastra a lo largo del fundamental de una nota, o da clic para todo el sonido. Se selecciona la nota con todos sus armónicos (un "peine"). El fundamental se ajusta al parcial más fuerte a menos de un semitono; con **Shift** queda exactamente donde das clic (útil sobre ruido, como lluvia o viento). |
 | **Wand** | Varita mágica: da clic en algo que se vea (una nota, un golpe, una cola) y se selecciona la zona alrededor. |
 | **Erase** | Arrastra para quitar de la selección. |
 | **Move** | Solo elige y mueve selecciones, nunca dibuja. |

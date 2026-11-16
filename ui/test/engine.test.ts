@@ -150,6 +150,8 @@ test("magic wand traces the clicked area; snapRow finds the loudest row", async 
   assert.deepEqual([Math.min(...ny), Math.max(...ny)], [7, 8]);
   assert.deepEqual(wandRegion(img, 25, 2, 20), []);                       // silence: nothing
   assert.ok(Math.abs(snapRow(img, 9.2, 3, 10, 19) - 7.5) < 0.5);
+  const noise = { data: new Uint8Array(30 * 20).map((_, i) => 40 + (i * 7919 % 9)), cols: 30, rows: 20 };   // flat, ±2 dB
+  assert.equal(snapRow(noise, 9.2, 3, 0, 29), 9.2);                       // nothing stands out: keep the click
 });
 
 test("multiresolution (three bands, three grids) matches Layer.synthesize(multires=True)", async () => {

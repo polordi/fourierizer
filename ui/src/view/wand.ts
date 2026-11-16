@@ -7,7 +7,9 @@
 export interface Img { data: Uint8Array; cols: number; rows: number; }
 
 /** The row (fractional, parabola-refined) with the highest mean level over columns [c0, c1]
- *  among rows within ±`reach` of `row`. Returns `row` itself if everything there is silent. */
+ *  among rows within ±`reach` of `row`. Returns `row` itself if everything there is silent, or if
+ *  nothing stands out (no row at least 6 dB above the median, e.g. noise): then the click is
+ *  kept as it is, so a comb can be placed freely on rain or wind. */
 export function snapRow(img: Img, row: number, reach: number, c0: number, c1: number): number {
   const { data, cols, rows } = img;
   const a = Math.max(0, Math.floor(row - reach)), b = Math.min(rows - 1, Math.ceil(row + reach));
@@ -19,8 +21,11 @@ export function snapRow(img: Img, row: number, reach: number, c0: number, c1: nu
     return s / (c1 - c0 + 1);   // lower = louder
   };
   let best = -1, bestV = Infinity;
-  for (let r = a; r <= b; r++) { const v = mean(r); if (v < bestV) { bestV = v; best = r; } }
+  const vals: number[] = [];
+  for (let r = a; r <= b; r++) { const v = mean(r); vals.push(v); if (v < bestV) { bestV = v; best = r; } }
   if (best < 0 || bestV >= 254) return row;
+  vals.sort((x, y) => x - y);
+  if (vals[vals.length >> 1] - bestV < 12) return row;   // 12 half-dB steps = 6 dB: no clear peak
   let off = 0;
   if (best > 0 && best < rows - 1) {
     const p = mean(best - 1), q = bestV, n = mean(best + 1), den = p - 2 * q + n;
