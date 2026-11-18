@@ -106,3 +106,24 @@ Los dos borradores están en `D:\Samples Polo\Fourierizer\Video drafts`. Las esc
 **Story** (0:34, 1080 × 1920): frase 1 → T1 → T3 → acordes → frase 3 y logotipo. La app conserva su diseño horizontal dentro de una ventana; arriba va el nombre y abajo los subtítulos grandes.
 
 Todo el audio es del motor: los ▶ de la app y, para los acordes, la salida real de la app.
+
+## Segundo corte (2026-11-18)
+
+Notas del autor sobre el primer corte, y lo que cambió:
+
+- **Los acordes se trababan y sonaban sucios.** La app los tocaba en vivo mientras el navegador grababa la pantalla, y el audio se quedaba sin CPU, como FL cuando la demanda es muy alta. Ahora la app registra cada nota con su hora y el sonido se renderiza fuera de línea con el mismo sampler (raíz, ADSR y ganancia de la app), exacto a la muestra. En pantalla se ve lo mismo: las teclas y el cabezal.
+- **Cortes de sonido abruptos y silencios.**
+  - Entre escenas, la imagen y el sonido se funden en 0.45 s.
+  - Cada sonido entra con un fundido corto y, si se corta, sale con 0.35 s.
+  - Debajo de todo el video corre un **fondo** hecho con el pad hueco de T2, tocado lento y grave (Am – F – C – G). Baja solo (sidechain) cuando suena la demostración, así que nunca queda en silencio.
+- **Las frases.** Ahora usan el diseño de la app:
+  - un módulo con tornillos y un display con el espectrograma del sonido que se oye, bajo el cabezal;
+  - las palabras suben una tras otra;
+  - el cursor **selecciona** las palabras clave con el rectángulo de la app, en el color de una capa;
+  - en la frase 3, "filter" y "sampler" se borran con la goma.
+
+  El logotipo aparece letra por letra y la tecla FOURIERIZE se presiona.
+- **T5 (golpe + cola) no se sentía como un sonido usable.** Lo reemplaza **una nota hecha de dos sonidos en C**: el golpe del teclado *Glass keys* (1.8 s, con un fundido de salida de 1.4 s) florece en el pad *Heaven* (completo, que entra lento). La suma suena como un solo instrumento. La escena cierra tocando un arpegio de Cmaj7 con él. Las otras pruebas (Glass + Grace, kalimba + cuerdas, piano + cuerdas) están en `Video previews/T5 nuevo (golpe + cuerpo)`.
+- **El cuadro raro al cambiar de capa** era la transformación de la propia app a medio camino. Ahora el cambio ocurre bajo una imagen congelada y se disuelve. Las esperas de render se quitan del video, también bajo la imagen congelada.
+
+Duraciones: trailer **2:51**, story **0:32**. Están en `Video drafts` como `*-draft2.mp4`.

@@ -120,8 +120,16 @@ export class BrowserHost implements Host {
     // ?capture (the release videos): expose the exact audio the app produced, so the video's
     // soundtrack is what the screen shows. Nothing changes without the flag.
     if (typeof location !== "undefined" && new URLSearchParams(location.search).has("capture"))
-      (globalThis as unknown as { __fzCapture: unknown }).__fzCapture = { result: () => this.result, preview: () => this.lastPreview };
+    {
+      this.notes = [];
+      (globalThis as unknown as { __fzCapture: unknown }).__fzCapture = {
+        result: () => this.result, preview: () => this.lastPreview, notes: this.notes,
+        sampler: () => ({ root: this.sampler.root, mode: this.sampler.mode, env: this.sampler.env }),
+      };
+    }
   }
+  /** ?capture only: every note played, with its wall-clock time, so a video can render it offline. */
+  private notes: { on: boolean; note: number; velocity: number; t: number }[] | null = null;
   private lastPreview: { selection: Float32Array[]; original: Float32Array[] | null; gain: number } | null = null;
 
   private call<T>(msg: WorkerRequest, transfer: Transferable[] = []): Promise<T> {
@@ -265,8 +273,8 @@ export class BrowserHost implements Host {
   stopPreview(): void { this.sampler.stopPreview(); }
 
   ensureAudio(): void { this.sampler.ensure(); }
-  noteOn(note: number, velocity: number): void { this.sampler.noteOn(note, velocity); }
-  noteOff(note: number): void { this.sampler.noteOff(note); }
+  noteOn(note: number, velocity: number): void { this.notes?.push({ on: true, note, velocity, t: Date.now() }); this.sampler.noteOn(note, velocity); }
+  noteOff(note: number): void { this.notes?.push({ on: false, note, velocity: 0, t: Date.now() }); this.sampler.noteOff(note); }
   allOff(): void { this.sampler.allOff(); }
   setSampler(p: SamplerParams): void {
     this.sampler.root = p.root;
